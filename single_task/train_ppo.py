@@ -1,7 +1,14 @@
 import sys
-directory = 'pianomime'
-if directory not in sys.path:
-    sys.path.append(directory)
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+SINGLE_TASK_DIR = Path(__file__).resolve().parent
+
+for p in [PROJECT_ROOT, SINGLE_TASK_DIR]:
+    p = str(p)
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
 from pathlib import Path
 from typing import Optional, Tuple
 import tyro
@@ -195,7 +202,13 @@ def main(args: Args) -> None:
     print(eval_env.env.latest_filename)
     print(eval_env.env.get_musical_metrics())
     actions = np.array(actions)
-    np.save("./trained_songs/{}/actions_{}".format(args.mimic_task, args.mimic_task), actions)
+
+    save_dir = f"./trained_songs/{args.mimic_task}"
+    os.makedirs(save_dir, exist_ok=True)
+
+    save_path = f"{save_dir}/actions_{args.mimic_task}.npy"
+    np.save(save_path, actions)
+    # np.save("./trained_songs/{}/actions_{}".format(args.mimic_task, args.mimic_task), actions)
 
     del model # remove to demonstrate saving and loading
 
