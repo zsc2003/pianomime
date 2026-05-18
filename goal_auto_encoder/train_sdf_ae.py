@@ -1,7 +1,7 @@
 import network
 from dataset import read_dataset
 import torch
-import numpy as np  
+import numpy as np
 from diffusers.training_utils import EMAModel
 import wandb
 from tqdm.auto import tqdm
@@ -58,7 +58,7 @@ if __name__ == '__main__':
                     q = torch.randint(0, 88, (x.shape[0], 1)).to(device)
                     x_hat, sdf_hat = ae(x=x, q=q)
 
-                    # loss = ((x - x_hat)**2).sum() + vae.encoder.kl 
+                    # loss = ((x - x_hat)**2).sum() + vae.encoder.kl
                     # loss = ae.encoder.kl
                     loss = get_sdf_loss(sdf_hat, x, q)
                     loss += ae.encoder.reg * 1e-3
@@ -84,11 +84,11 @@ if __name__ == '__main__':
                     test_loss = list()
                     for x in test_loader:
                         x = x.to(device)
-                        # Randomize int q of shape (B,) in [0, 87]  
+                        # Randomize int q of shape (B,) in [0, 87]
                         q = torch.randint(0, 88, (x.shape[0], 1)).to(device)
                         x_hat, sdf_hat = ae(x=x, q=q)
                         # loss = ae.encoder.kl
-                        # loss = ((x - x_hat)**2).sum() + vae.encoder.kl 
+                        # loss = ((x - x_hat)**2).sum() + vae.encoder.kl
                         loss = get_sdf_loss(sdf_hat, x, q)
                         test_loss.append(loss.item())
                     print("Test loss:", np.mean(test_loss))

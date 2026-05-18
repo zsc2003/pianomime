@@ -14,9 +14,9 @@ def read_dataset(dataset_path, train_split=0.8, batch_size=512):
     dataset = MidiDataset(
         dataset_path=dataset_path,
     )
-    train_set, test_set = torch.utils.data.random_split(dataset, 
-                                                        [int(len(dataset)*train_split), 
-                                                         len(dataset)-int(len(dataset)*train_split)], 
+    train_set, test_set = torch.utils.data.random_split(dataset,
+                                                        [int(len(dataset)*train_split),
+                                                         len(dataset)-int(len(dataset)*train_split)],
                                                         torch.Generator().manual_seed(42))
     # create dataloader
     train_loader = torch.utils.data.DataLoader(
@@ -74,5 +74,3 @@ class FingertipDataset(torch.utils.data.Dataset):
             'obs': dataset_root['data']['state'][:],
             'action': dataset_root['data']['action'][:]
         }
-        
-        

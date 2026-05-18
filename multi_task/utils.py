@@ -195,8 +195,8 @@ def get_goal_only_obs(timestep, lookahead=0):
     goal = goal.flatten()
     return goal
 
-def get_diffusion_obs(timestep, lookahead=3, exclude_keys=[], 
-                      encoder=None, plan_encoder=None, sampling=False, 
+def get_diffusion_obs(timestep, lookahead=3, exclude_keys=[],
+                      encoder=None, plan_encoder=None, sampling=False,
                       current_fingertip=None, concatenate_keys=[]):
     ret = {}
     goal = timestep.observation['goal'][:89*(lookahead+1)]
@@ -223,7 +223,7 @@ def get_diffusion_obs(timestep, lookahead=3, exclude_keys=[],
             goal = encoder.forward_without_sampling(torch.from_numpy(goal))
             ret['goal'] = goal.detach().numpy().flatten()
     else:
-        ret['goal'] = goal.flatten()      
+        ret['goal'] = goal.flatten()
     if plan_encoder is not None:
         assert current_fingertip is not None
         goal = ret['goal']
@@ -235,7 +235,7 @@ def get_diffusion_obs(timestep, lookahead=3, exclude_keys=[],
         ret['goal'] = plan.detach().numpy().flatten()
     elif current_fingertip is not None:
         ret['current_fingertip'] = current_fingertip.flatten()
-    if 'hand' not in exclude_keys:  
+    if 'hand' not in exclude_keys:
         q_hand_l = timestep.observation['lh_shadow_hand/joints_pos'] / (np.pi) # normalize to [-1, 1]
         q_hand_r = timestep.observation['rh_shadow_hand/joints_pos'] / (np.pi) # normalize to [-1, 1]
         q_hand = np.concatenate((q_hand_l, q_hand_r), axis=0).flatten()
@@ -271,9 +271,9 @@ def get_diffusion_obs(timestep, lookahead=3, exclude_keys=[],
             del ret[key]
     return ret
 
-def get_flattend_obs(timestep, lookahead=3, exclude_keys=[], encoder=None, sampling=False, 
+def get_flattend_obs(timestep, lookahead=3, exclude_keys=[], encoder=None, sampling=False,
                      plan_encoder=None, current_fingertip=None, concatenate_keys=[]):
-    ret = get_diffusion_obs(timestep, lookahead, exclude_keys=exclude_keys, encoder=encoder, sampling=sampling, 
+    ret = get_diffusion_obs(timestep, lookahead, exclude_keys=exclude_keys, encoder=encoder, sampling=sampling,
                             plan_encoder=plan_encoder, current_fingertip=current_fingertip, concatenate_keys=concatenate_keys)
     # Concatenate the items in ret
     items = list(ret.values())
@@ -354,7 +354,7 @@ def get_env_test(task_name, enable_ik = True, record_dir=None, lookahead = 3,
 
     env = Dm2GymWrapper(env)
     return env.env
-    
+
 
 def get_env_hl(task_name, record_dir=None, lookahead = 3, use_fingering_emb=False,
                 use_midi=False):
@@ -366,13 +366,13 @@ def get_env_hl(task_name, record_dir=None, lookahead = 3, use_fingering_emb=Fals
         except:
             with open('dataset/notes_test/{}.pkl'.format(task_name), 'rb') as f:
                 note_traj = pickle.load(f)
-        notes = note_traj.notes        
+        notes = note_traj.notes
         length = len(notes)
         trim = False if length >=600 or length < 500 else True
     if use_midi:
         task = piano_with_shadow_hands_res.PianoWithShadowHandsResidual(
             # hand_side=HandSide.LEFT,
-            # note_trajectory=note_traj, 
+            # note_trajectory=note_traj,
             midi=music.load(task_name),
             change_color_on_activation=True,
             trim_silence=True,
@@ -427,7 +427,7 @@ def get_env_hl(task_name, record_dir=None, lookahead = 3, use_fingering_emb=Fals
     env = DmControlWrapper(env)
 
     env = Dm2GymWrapper(env)
-    
+
     return env.env, length
 
 def get_env_ll(task_name, enable_ik = True, record_dir=None, lookahead = 3, external_demo=False, use_fingering_emb=False,
@@ -444,7 +444,7 @@ def get_env_ll(task_name, enable_ik = True, record_dir=None, lookahead = 3, exte
     # Load hand action trajectory
     left_hand_action_list = np.load('pianomime/multi_task/trajectories/{}_left_hand_action_list.npy'.format(task_name))
     right_hand_action_list = np.load('pianomime/multi_task/trajectories/{}_right_hand_action_list.npy'.format(task_name))
-            
+
     length = left_hand_action_list.shape[0]
     trim = False if length >=600 or length < 500 else True
 
@@ -506,7 +506,7 @@ def get_env_ll(task_name, enable_ik = True, record_dir=None, lookahead = 3, exte
                         remove_goal_observation=False,
                         mimic_z_axis=False,
                         n_steps_lookahead=lookahead,)
-    env = ResidualWrapper(env, 
+    env = ResidualWrapper(env,
                         demonstrations_lh=left_hand_action_list,
                         demonstrations_rh=right_hand_action_list,
                         demo_ctrl_timestep=0.05,
@@ -522,7 +522,7 @@ def get_env_ll(task_name, enable_ik = True, record_dir=None, lookahead = 3, exte
     env = DmControlWrapper(env)
 
     env = Dm2GymWrapper(env)
-    
+
     return env.env
 
 def adjust_ft_fingering(env, keys, lh_ft, rh_ft, last_keys=None, last_lh_ft=None, last_rh_ft=None, last_fingering=None):
@@ -531,7 +531,7 @@ def adjust_ft_fingering(env, keys, lh_ft, rh_ft, last_keys=None, last_lh_ft=None
     rh_ft[2, :] = np.ones(6) * consts.WHITE_KEY_HEIGHT * 2
     lh_ft_old = lh_ft.copy()
     rh_ft_old = rh_ft.copy()
-    lh_ft = lh_ft.T[1:] 
+    lh_ft = lh_ft.T[1:]
     rh_ft = rh_ft.T[1:]
     ft_l_to_r = np.concatenate((lh_ft[::-1], rh_ft), axis=0)
     # print(ft_l_to_r)
@@ -540,7 +540,7 @@ def adjust_ft_fingering(env, keys, lh_ft, rh_ft, last_keys=None, last_lh_ft=None
         last_rh_ft = last_rh_ft.T[1:]
         last_ft_l_to_r = np.concatenate((last_lh_ft[::-1], last_rh_ft), axis=0)
         last_keys = [int(key) for key in last_keys[0]]
-        
+
     fingering = np.ones(10) * -1
     occupied_fingers = []
     keys = [int(key) for key in keys[0]]
@@ -587,9 +587,3 @@ def adjust_ft_fingering(env, keys, lh_ft, rh_ft, last_keys=None, last_lh_ft=None
     # print(lh_ft, rh_ft)
     # print(fingering)
     return lh_ft, rh_ft, fingering
-                    
-                
-            
-        
-            
-

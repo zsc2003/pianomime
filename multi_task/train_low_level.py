@@ -43,7 +43,7 @@ if __name__ == '__main__':
                               action_horizon=action_horizon,
                               dataset_path=dataset_path,
                               normalization=True)
-  
+
     def create_midi_encoder(device='cuda'):
         # TCN for midi encoding
         midi_encoder = ConvEncoder(
@@ -55,7 +55,7 @@ if __name__ == '__main__':
                         noise_ft=0,
                     ).to(device)
         return midi_encoder
-    
+
     # Conditional UNet for noise prediction
     noise_pred_net = ConditionalUnet1D(
         input_dim=action_dim,

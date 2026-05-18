@@ -38,7 +38,7 @@ if __name__ == '__main__':
                               action_horizon=action_horizon,
                               dataset_path=dataset_path,
                               normalization=True)
-  
+
     def create_midi_encoder(device='cuda'):
         midi_encoder = ConvEncoder(
                         in_channels=16,
@@ -144,7 +144,7 @@ if __name__ == '__main__':
                     # L2 loss
                     l = noise_pred-noise
 
-                    loss = nn.functional.mse_loss(noise_pred, noise) 
+                    loss = nn.functional.mse_loss(noise_pred, noise)
 
                     # optimize
                     loss.backward()

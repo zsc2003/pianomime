@@ -37,7 +37,7 @@ if __name__ == '__main__':
                               action_horizon=action_horizon,
                               dataset_path=dataset_path,
                               normalization=True)
-  
+
     mlp = MLP(
         in_dim = obs_dim,
         out_dim = action_dim,
@@ -99,13 +99,13 @@ if __name__ == '__main__':
                     obs_cond = obs_cond.flatten(start_dim=1)
 
                     action_pred = mlp(obs_cond)
-                    
+
                     # L2 loss
                     naction = naction.squeeze()
                     # print(action_pred.shape, naction.shape)
                     l = naction-action_pred
 
-                    loss = nn.functional.mse_loss(action_pred, naction) 
+                    loss = nn.functional.mse_loss(action_pred, naction)
 
                     # optimize
                     loss.backward()

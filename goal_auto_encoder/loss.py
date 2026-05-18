@@ -6,7 +6,7 @@ from utils import get_keys_sdf, get_point_sdf
 def get_sdf_loss(pred, nobs, q):
     # Get sdf loss of a batch
     # pred: (B, T, 1)
-    # nobs: (B, 88) 
+    # nobs: (B, 88)
     # q: (B, 1)
     # The loss of (T, 1) is calculated by get_keys_sdf()
     target = torch.zeros_like(pred)
@@ -20,7 +20,7 @@ def get_sdf_loss(pred, nobs, q):
 def get_point_sdf_loss(pred, nobs, q):
     # Get sdf loss of a batch
     # pred: (B, T, 1)
-    # nobs: (B, 88) 
+    # nobs: (B, 88)
     # q: (B, 2)
     # The loss of (T, 1) is calculated by get_keys_sdf()
     target = torch.zeros_like(pred)
@@ -92,5 +92,3 @@ class Recall(nn.Module):
 
 if __name__ == "__main__":
     print(piano.keys)
-
-

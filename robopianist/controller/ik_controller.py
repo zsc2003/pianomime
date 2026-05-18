@@ -207,7 +207,7 @@ def move_fingers_to_pos_qp(env: dm_env.Environment,
     qvel = solver.solve()
     return qvel, solver.dof_indices, target_poses
 
-def move_fingers_to_pos(env: dm_env.Environment, 
+def move_fingers_to_pos(env: dm_env.Environment,
                         hand_action: np.ndarray,
                         finger_names: list=['lf', 'rf', 'mf', 'ff', 'th'],
                         hand_side: str='none',
@@ -279,8 +279,8 @@ def move_fingers_to_pos(env: dm_env.Environment,
                                                 )
     return ik_result
 
-def move_fingers_to_keys(env: dm_env.Environment, 
-                         key_indices: list, 
+def move_fingers_to_keys(env: dm_env.Environment,
+                         key_indices: list,
                          offset_x: float=[0]*5,
                          offset_y: float=[0]*5,
                          finger_names: list=['lf', 'rf', 'mf', 'ff', 'th'],
@@ -314,7 +314,7 @@ def move_fingers_to_keys(env: dm_env.Environment,
     wrist_joint_names = ["lh_shadow_hand/"+"lh_WRJ2",
                             "lh_shadow_hand/"+"lh_WRJ1"]
     forearm_joint_names = ["lh_shadow_hand/"+env.task._hand.joints[-3].name,
-                            "lh_shadow_hand/"+env.task._hand.joints[-2].name, 
+                            "lh_shadow_hand/"+env.task._hand.joints[-2].name,
                             "lh_shadow_hand/"+env.task._hand.joints[-1].name]
     finger_joint_names = []
     for finger_name in finger_names:
@@ -337,7 +337,7 @@ def move_finger_to_key(env: dm_env.Environment, key_index: int, finger_name):
         prefix = "black_key_"
     else:
         raise ValueError(f"Invalid key index: {key_index}")
-    
+
     # Position of the piano joint as the target position
     target_pos = mjcf_utils.safe_find(env.task.piano._mjcf_root, "body", f"{prefix}{key_index}").pos
 
@@ -346,26 +346,24 @@ def move_finger_to_key(env: dm_env.Environment, key_index: int, finger_name):
     # print(target_pos)
     # print(mjcf_utils.safe_find_all(env.task._hand._mjcf_root, "body"))
     # print(mjcf_utils.safe_find_all(env.task._hand._mjcf_root, "site"))
-    # print(env.task._hand.root_body.pos) 
+    # print(env.task._hand.root_body.pos)
     # print(env.physics.named.data.qpos)
     # print(env.physics.model.id2name(89, 'joint'))
 
     # Wrist, forearm and the dedicated finger joints are available for IK
     wrist_joint_names = ["lh_shadow_hand/"+"lh_WRJ2",
                             "lh_shadow_hand/"+"lh_WRJ1"]
-    forearm_joint_names = ["lh_shadow_hand/"+env.task._hand.joints[-2].name, 
+    forearm_joint_names = ["lh_shadow_hand/"+env.task._hand.joints[-2].name,
                             "lh_shadow_hand/"+env.task._hand.joints[-1].name]
     finger_joint_names = [env.physics.model.id2name(FINGER_BASE_IDX[finger_name]+i, 'joint') for i in range(FINGER_JOINTS[finger_name])]
     joint_names = forearm_joint_names + finger_joint_names + wrist_joint_names
-    
+
     # Calculate the IK result
-    ik_result = ik.qpos_from_site_pose(physics=env.physics, 
-                                       site_name="lh_shadow_hand/"+finger_name+"distal_site", 
+    ik_result = ik.qpos_from_site_pose(physics=env.physics,
+                                       site_name="lh_shadow_hand/"+finger_name+"distal_site",
                                        target_pos=target_pos,
                                        joint_names=joint_names,
-                                    #    joint_names=("lh_shadow_hand/"+env.task._hand.joints[-2].name, 
+                                    #    joint_names=("lh_shadow_hand/"+env.task._hand.joints[-2].name,
                                     #                 "lh_shadow_hand/"+env.task._hand.joints[-1].name),
                                        )
     return ik_result
-    
-    

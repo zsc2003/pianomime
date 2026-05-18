@@ -97,7 +97,7 @@ class Args:
     agent_config: sac.SACConfig = sac.SACConfig()
     deepmimic: bool = False
     mimic_task: str = "TwinkleTwinkleRousseau"
-    midi_start_from: int = 0    
+    midi_start_from: int = 0
     residual_action: bool = False
     num_envs: int = 16
     pretrained: Optional[Path] = None
@@ -140,18 +140,18 @@ def main(args: Args) -> None:
 
     policy_kwargs = dict(activation_fn=torch.nn.ReLU,
                      net_arch=dict(pi=[1024, 256], vf=[1024, 256]))
-    model = PPO("MlpPolicy", 
-                vec_env, 
+    model = PPO("MlpPolicy",
+                vec_env,
                 n_steps=256,
                 batch_size=1024,
                 learning_rate=lr_scheduler_instance.lr_schedule,
-                policy_kwargs=policy_kwargs, 
+                policy_kwargs=policy_kwargs,
                 verbose=1,
                 tensorboard_log="./robopianist_rl/tensorboard/{}".format(run_name),
                 )
     if args.pretrained is not None:
         model = PPO.load(args.pretrained, env=vec_env)
-    
+
     if args.save_actions:
         os.makedirs("./trained_songs", exist_ok=True)
         os.makedirs("./trained_songs/{}".format(args.mimic_task), exist_ok=True)

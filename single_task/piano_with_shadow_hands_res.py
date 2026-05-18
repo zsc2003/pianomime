@@ -102,7 +102,7 @@ class PianoWithShadowHandsResidual(base.PianoTask):
             energy_penalty_coef: Coefficient for the energy penalty.
             randomize_hand_positions: If True, randomizes the initial position of the
                 hands at the beginning of each episode.
-            fingering_lookahead: If True, insert the ahead fingering information in the 
+            fingering_lookahead: If True, insert the ahead fingering information in the
                 observation.
             midi_start_from: The index of the note to start from.
             residual_factor: The factor to multiply the residual action.
@@ -245,7 +245,7 @@ class PianoWithShadowHandsResidual(base.PianoTask):
                 self._colorize_keys_without_fingering(physics)
         should_not_be_pressed = np.flatnonzero(1 - self._goal_current[:-1])
         self._failure_termination = self.piano.activation[should_not_be_pressed].any()
-    
+
     def extend_curriculum(self) -> None:
         self._curriculum_length += 100
 
@@ -269,7 +269,7 @@ class PianoWithShadowHandsResidual(base.PianoTask):
     def task_observables(self):
         return self._task_observables
 
-    def action_spec(self, physics: mjcf.Physics) -> specs.BoundedArray: 
+    def action_spec(self, physics: mjcf.Physics) -> specs.BoundedArray:
         right_spec = self.right_hand.action_spec(physics)
         left_spec = self.left_hand.action_spec(physics)
         hands_spec = spec_utils.merge_specs([right_spec, left_spec])
@@ -407,7 +407,7 @@ class PianoWithShadowHandsResidual(base.PianoTask):
             keys = [note.key for note in self._notes[t]]
             self._goal_state[i, keys] = 1.0
             self._goal_state[i, -1] = self._sustains[t]
-    
+
     def get_next_goal_state(self) -> np.ndarray:
         # Observable callables get called after `after_step` but before
         # `should_terminate_episode`. Since we increment `self._t_idx` in `after_step`,

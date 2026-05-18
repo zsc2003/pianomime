@@ -19,7 +19,7 @@ class Embeddings(nn.Module):
     # input x: (batch_size, seq_len)
     # output: (batch_size, seq_len, d_model)
     def forward(self, x):
-        out =  self.lut(x) 
+        out =  self.lut(x)
         return out
 
 class PositionalEncoding(nn.Module):
@@ -57,7 +57,7 @@ class MultiHeadedAttention(nn.Module):
             [nn.Linear(d_model, d_model) for _ in range(4)])
         self.attn = None
         self.dropout = nn.Dropout(p=dropout)
-    
+
     def forward(self, query, key, value, mask=None):
         if mask is not None:
             mask = mask.unsqueeze(1)
@@ -74,7 +74,7 @@ class MultiHeadedAttention(nn.Module):
         x = x.transpose(1, 2).contiguous().view(nbatches, -1, self.h * self.d_k)
         return self.linears[-1](x)
 
-    def attention(self, query, key, value, mask=None, dropout=None): 
+    def attention(self, query, key, value, mask=None, dropout=None):
         d_k = query.size(-1)
         # (batch_size, h, seq_len, d_k)
         scores = torch.matmul(query, key.transpose(-2, -1)) / math.sqrt(d_k)
@@ -86,7 +86,7 @@ class MultiHeadedAttention(nn.Module):
             p_attn = dropout(p_attn)
         # (batch_size, h, seq_len, d_k) * (batch_size, h, seq_len, seq_len)
         # => (batch_size, h, seq_len, d_k)
-        return torch.matmul(p_attn, value), p_attn 
+        return torch.matmul(p_attn, value), p_attn
 
 class DecoderLayer(nn.Module):
     def __init__(self, size, self_attn, feed_forward, dropout):
@@ -152,5 +152,3 @@ if __name__ == '__main__':
     mask = None
     y = decoder(x, mask=mask)
     print(y.shape)
-
-        

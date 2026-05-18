@@ -111,7 +111,7 @@ class ConvEncoder(nn.Module):
         x = self.block(x)
         x = self.block2(x)
         return x
-    
+
     def forward_without_sampling(self, x):
         x = x.reshape(x.shape[0], self.in_channels, -1)
         # Add gaussian noise
@@ -317,7 +317,7 @@ class ConditionalResidualBlock1D(nn.Module):
         # make sure dimensions compatible
         self.residual_conv = nn.Conv1d(in_channels, out_channels, 1) \
             if in_channels != out_channels else nn.Identity()
-    
+
     def get_midi_encoder_output_dim(self, midi_dim):
         x = torch.randn(1, 88, 1)
         x = self.midi_encoder(x)
@@ -349,7 +349,7 @@ class ConditionalResidualBlock1D(nn.Module):
             embed = torch.cat([cond_midi, cond_2], dim=-1)
             embed = self.cond_encoder(embed)
         self.kl = self.midi_encoder.kl
-            
+
         embed = embed.reshape(
             embed.shape[0], 2, self.out_channels, 1)
         scale = embed[:,0,...]
@@ -514,7 +514,7 @@ class ConditionalUnet1D(nn.Module):
             self.kl += resnet.kl + resnet2.kl
             cnt += 2
             x = upsample(x)
-        
+
         self.kl = self.kl / cnt
 
         x = self.final_conv(x)

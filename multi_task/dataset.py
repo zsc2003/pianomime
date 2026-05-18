@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import zarr
 
-def read_dataset_split(dataset_path, 
+def read_dataset_split(dataset_path,
                        pred_horizon,
                        obs_horizon,
                        action_horizon,
@@ -17,8 +17,8 @@ def read_dataset_split(dataset_path,
         action_horizon=action_horizon,
         normalization=normalization
     )
-    train_set, test_set = torch.utils.data.random_split(dataset, 
-                                                        [int(len(dataset)*0.8), len(dataset)-int(len(dataset)*0.8)], 
+    train_set, test_set = torch.utils.data.random_split(dataset,
+                                                        [int(len(dataset)*0.8), len(dataset)-int(len(dataset)*0.8)],
                                                         torch.Generator().manual_seed(42))
     # save training data statistics (min, max) for each dim
     stats = dataset.stats
@@ -48,13 +48,13 @@ def read_dataset_split(dataset_path,
     return train_loader, test_loader, stats
 
 
-def read_dataset(pred_horizon, 
-                 obs_horizon, 
+def read_dataset(pred_horizon,
+                 obs_horizon,
                  action_horizon,
                  dataset_path,
                  normalization=False):
     # Read the dataset without splitting
-    
+
     #|o|o|                             observations: 2
     #| |a|a|a|a|a|a|a|a|               actions executed: 8
     #|p|p|p|p|p|p|p|p|p|p|p|p|p|p|p|p| actions predicted: 16

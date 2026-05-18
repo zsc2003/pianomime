@@ -61,7 +61,7 @@ class ResidualWrapper(EnvironmentWrapper):
 
     def observation_spec(self):
         return self._observation_spec
-    
+
     def _add_prior_action_observation(self, timestep: dm_env.TimeStep) -> dm_env.TimeStep:
         prior_qpos = self._get_prior_action()
         self._prior_action = self.qpos2ctrl(prior_qpos)
@@ -70,7 +70,7 @@ class ResidualWrapper(EnvironmentWrapper):
                 timestep.observation, **{"prior_action": self._prior_action}
             )
         )
-    
+
     def _add_demo_observation(self, timestep: dm_env.TimeStep) -> dm_env.TimeStep:
         if self._external_demo:
             if self.current_demo_lh is not None and self.current_demo_rh is not None:
@@ -94,7 +94,7 @@ class ResidualWrapper(EnvironmentWrapper):
             observation=collections.OrderedDict(
                 timestep.observation, **{"demo": demo}
             )
-        ) 
+        )
 
     def set_current_demo(self, demonstrations_lh, demonstrations_rh):
         self.current_demo_lh = demonstrations_lh
@@ -171,12 +171,12 @@ class ResidualWrapper(EnvironmentWrapper):
             action_hand = action[:-1]
         self.non_residual_action = action_hand
         action_sustain = action[-1]
-        # Merge action_sustain into action_hand 
+        # Merge action_sustain into action_hand
         action = np.append(action_hand, action_sustain)
         timestep = self._environment.step(action)
         self._reference_frame_idx = int(min(self._reference_frame_idx+self._step_scale, self._demonstrations_length-1))
         return self._add_demo_observation(self._add_prior_action_observation(timestep))
-    
+
     def get_non_residual_action(self):
         return self.non_residual_action
 
@@ -192,9 +192,7 @@ class ResidualWrapper(EnvironmentWrapper):
             action = self.qpos2ctrl(reference_joint_pos)
             self._environment.task.right_hand.configure_joints(self.physics, action[:27])
             self._environment.task.left_hand.configure_joints(self.physics, action[27:])
-        else: 
+        else:
             self._reference_frame_idx = -int(round(self._environment.task._initial_buffer_time/
                                                self._environment.task.control_timestep))
         return self._add_demo_observation(self._add_prior_action_observation(timestep))
-
-    

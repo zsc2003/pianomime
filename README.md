@@ -6,8 +6,8 @@
 
 **Cheng Qian**<sup>1</sup>, **Julen Urain**<sup>2</sup>, **Kevin Zakka**<sup>3</sup>, **Jan Peters**<sup>2</sup>
 
-<sup>1</sup>TU Munich, 
-<sup>2</sup>TU Darmsadt, 
+<sup>1</sup>TU Munich,
+<sup>2</sup>TU Darmsadt,
 <sup>3</sup>UC Berkeley
 
 TLDR:
@@ -38,7 +38,7 @@ Follow the steps below to set up the PianoMime.
 
 ### Step 1: Clone the Repository
 Start by cloning the repository:
-    
+
 ```sh
 git clone https://github.com/sNiper-Qian/pianomime.git
 ```
@@ -97,13 +97,13 @@ Please use the following citation:
       eprint={2407.18178},
       archivePrefix={arXiv},
       primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2407.18178}, 
+      url={https://arxiv.org/abs/2407.18178},
 }
 ```
 
 ## Acknowledgements
 
-The simulation environment is based on RoboPianist [RoboPianist](https://github.com/google-research/robopianist)  
+The simulation environment is based on RoboPianist [RoboPianist](https://github.com/google-research/robopianist)
 
 The diffusion policy is adapted from [Diffusion Policy](https://github.com/real-stanford/diffusion_policy)
 

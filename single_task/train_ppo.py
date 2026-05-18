@@ -82,7 +82,7 @@ class Args:
     action_reward_observation: bool = False
     deepmimic: bool = False
     mimic_task: str = "TwinkleTwinkleRousseau"
-    midi_start_from: int = 0    
+    midi_start_from: int = 0
     residual_action: bool = False
     num_envs: int = 16
     pretrained: Optional[Path] = None
@@ -136,13 +136,13 @@ def main(args: Args) -> None:
 
     policy_kwargs = dict(activation_fn=torch.nn.GELU,
                      net_arch=dict(pi=[1024, 256], vf=[1024, 256]))
-    model = PPO("MlpPolicy", 
-                vec_env, 
+    model = PPO("MlpPolicy",
+                vec_env,
                 n_epochs=10,
                 n_steps=args.n_steps,
                 batch_size=1024,
                 learning_rate=lr_scheduler_instance.lr_schedule,
-                policy_kwargs=policy_kwargs, 
+                policy_kwargs=policy_kwargs,
                 verbose=2,
                 tensorboard_log="./robopianist_rl/tensorboard/{}".format(run_name),
                 )
@@ -155,7 +155,7 @@ def main(args: Args) -> None:
     try:
         for i in range(args.total_iters):
             # Training
-            model.learn(total_timesteps=args.n_steps*args.num_envs, 
+            model.learn(total_timesteps=args.n_steps*args.num_envs,
                         progress_bar=True,
                         reset_num_timesteps=False,
                         callback= None)
@@ -178,8 +178,8 @@ def main(args: Args) -> None:
                 model.save("./robopianist_rl/ckpts/{}_best".format(run_name))
                 # video = wandb.Video(str(eval_env.env.latest_filename), fps=4, format="mp4")
                 # wandb.log({"video": video, "global_step": i})
-            
-            eval_env.env.latest_filename.unlink()  
+
+            eval_env.env.latest_filename.unlink()
     except KeyboardInterrupt:
         pass
 

@@ -45,7 +45,7 @@ if __name__ == '__main__':
                               action_horizon=action_horizon,
                               dataset_path=dataset_path,
                               normalization=True)
-    
+
     action_ae = KMeansDiscretizer(action_dim=action_dim,
                                   predict_offsets=True,
                                   num_bins=64).to(device)
@@ -148,12 +148,12 @@ if __name__ == '__main__':
 
                 # Specify the path to save the EMA model's weights
                 ema_model_weights_path = 'diffusion/ckpts/checkpoint_{}_bet.ckpt'.format(run_name)
-                
+
 
                 # Save the EMA model's weights to the specified path
                 torch.save(ema_model_state_dict, ema_model_weights_path)
                 print("Saved checkpoint at epoch {}".format(epoch_idx))
-            
+
 
     # Weights of the EMA model
     # is used for inference

@@ -15,7 +15,7 @@ _REQUIRE_TARGET_POS_OR_QUAT = (
 
 class IK_qpsolver:
     def __init__(self,
-                 physics, 
+                 physics,
                  site_names,
                  target_pos: np.ndarray,
                  pos_weights: np.ndarray,
@@ -67,7 +67,7 @@ class IK_qpsolver:
             self.dof_indices = indexer.convert_key_item(joint_names)
         else:
             raise ValueError(_INVALID_JOINT_NAMES_TYPE.format(type(joint_names)))
-    
+
     def is_positive_definite(self, matrix):
         if not np.allclose(matrix, matrix.T):
             print("Matrix is not symmetric")
@@ -130,7 +130,7 @@ class IK_qpsolver:
             H += np.dot(weighted_jac_joints.T, weighted_jac_joints) + mu*np.eye(n_joints, dtype=dtype)
             c -= np.dot(weighted_err.T, weighted_jac_joints)
         return H, c
-    
+
     def build_inequalities(self):
         '''
         Build inequality constraints: joint limits.
@@ -153,7 +153,7 @@ class IK_qpsolver:
         p_mins = np.array(p_mins)
         h = np.hstack([p_maxs, -p_mins])
         return G, h
-    
+
     def solve(self):
         H, c = self.build_objective()
         G, h = self.build_inequalities()
@@ -171,7 +171,3 @@ class IK_qpsolver:
         v_full[self.dof_indices] = v
         mjlib.mj_integratePos(self.physics.model.ptr, self.physics.data.qpos, v_full, self.dt)
         return self.physics.data.qpos.copy()
-
-
-
-            

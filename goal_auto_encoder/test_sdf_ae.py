@@ -1,7 +1,7 @@
 import network
 from dataset import read_dataset
 import torch
-import numpy as np  
+import numpy as np
 from diffusers.training_utils import EMAModel
 import wandb
 from tqdm.auto import tqdm
@@ -39,7 +39,7 @@ if __name__ == '__main__':
     # Exponential Moving Average
     # accelerates training and improves stability
     # holds a copy of the model weights
-    # ema = torch.optim.swa_utils.AveragedModel(vae, 
+    # ema = torch.optim.swa_utils.AveragedModel(vae,
                                             # multi_avg_fn=torch.optim.swa_utils.get_ema_multi_avg_fn(0.999))
 
     # Standard ADAM optimizer
@@ -77,11 +77,11 @@ if __name__ == '__main__':
             #         # data normalized in dataset
             #         # device transfer
             #         x = x.to(device)
-            #         # Randomize int q of shape (B,) in [0, 87]  
+            #         # Randomize int q of shape (B,) in [0, 87]
             #         q = torch.randint(0, 88, (x.shape[0], 1)).to(device)
             #         x_hat, sdf_hat = ae(x=x, q=q)
 
-            #         # loss = ((x - x_hat)**2).sum() + vae.encoder.kl 
+            #         # loss = ((x - x_hat)**2).sum() + vae.encoder.kl
             #         # loss = ae.encoder.kl
             #         loss = get_sdf_loss(sdf_hat, x, q)
             #         loss += ae.encoder.reg * 1e-3
@@ -112,11 +112,11 @@ if __name__ == '__main__':
                     test_loss = list()
                     for x in test_loader:
                         x = x.to(device)
-                        # Randomize int q of shape (B,) in [0, 87]  
+                        # Randomize int q of shape (B,) in [0, 87]
                         q = torch.randint(0, 88, (x.shape[0], 1)).to(device)
                         x_hat, sdf_hat = ae.forward_without_sampling(x=x, q=q)
                         # loss = ae.encoder.kl
-                        # loss = ((x - x_hat)**2).sum() + vae.encoder.kl 
+                        # loss = ((x - x_hat)**2).sum() + vae.encoder.kl
                         loss = get_sdf_loss(sdf_hat, x, q)
                         test_loss.append(loss.item())
                         # wandb.log({"test loss": np.mean(test_loss)})

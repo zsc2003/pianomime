@@ -108,7 +108,7 @@ if __name__ == '__main__':
             clip_sample=True,
             # our network predicts noise (instead of denoised action)
             prediction_type='epsilon'
-        ) 
+        )
         # task_names = os.listdir('trained_songs')
         num_songs = 1
         losses = []
@@ -123,7 +123,7 @@ if __name__ == '__main__':
             timestep = env.reset()
             # Record last fingertip position
             lh_current, rh_current = env.task.get_fingertip_pos(env.physics)
-            last_fingertip_pos = np.concatenate((lh_current, rh_current), axis=0).flatten()     
+            last_fingertip_pos = np.concatenate((lh_current, rh_current), axis=0).flatten()
 
             step = 0
             B = 1
@@ -136,17 +136,17 @@ if __name__ == '__main__':
             with tqdm(total=max_steps, desc="Eval Env") as pbar:
                 while not timestep.last():
                     cont = np.zeros((4, midi_channel+action_dim))
-                    goal = get_flattend_obs(timestep, 
+                    goal = get_flattend_obs(timestep,
                                     lookahead=10,
                                     exclude_keys=[
-                                                'fingering', 
-                                                'hand', 
-                                                'fingering', 
-                                                'demo', 
-                                                'prior_action', 
+                                                'fingering',
+                                                'hand',
+                                                'fingering',
+                                                'demo',
+                                                'prior_action',
                                                 'q_piano',
-                                                ], 
-                                    encoder=encoder, 
+                                                ],
+                                    encoder=encoder,
                                     sampling=False)
                     cont[:, :midi_channel] = goal[:4*midi_channel].reshape((4, -1))
                     goal = torch.from_numpy(goal)
@@ -183,7 +183,7 @@ if __name__ == '__main__':
                     naction = naction.detach().to('cpu').numpy()
                     # Append 10 dimensions for fingering (not actually used)
                     naction = np.concatenate((naction, np.zeros((1, 4, 10))), axis=2).flatten()
-                    
+
                     naction = unnormalize_data(naction, stats['action'])
                     naction = naction.reshape(B, 4, -1)
                     action = naction[0][0]
@@ -194,10 +194,10 @@ if __name__ == '__main__':
                     keys = np.nonzero(goal)
 
                     # Adjust trajectory to align with the training data
-                    lh_ft, rh_ft, fingering = adjust_ft_fingering(env, keys, 
+                    lh_ft, rh_ft, fingering = adjust_ft_fingering(env, keys,
                                                                 nft[0][:18].reshape(6, 3).T,
                                                                 nft[0][18:].reshape(6, 3).T,
-                                                                last_keys, last_lh_ft, last_rh_ft, 
+                                                                last_keys, last_lh_ft, last_rh_ft,
                                                                 last_fingering)
                     last_lh_ft = lh_ft
                     last_rh_ft = rh_ft

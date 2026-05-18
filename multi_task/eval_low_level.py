@@ -110,23 +110,23 @@ def main() -> None:
 
     for i in range(1):
         left_hand_action_list = np.load('pianomime/multi_task/trajectories/{}_left_hand_action_list.npy'.format(task_name))
-        max_steps = left_hand_action_list.shape[0] 
-        env = get_env_ll(task_name=task_name, enable_ik=False, lookahead = 10, 
-                        record_dir=".", use_fingering_emb=False, 
+        max_steps = left_hand_action_list.shape[0]
+        env = get_env_ll(task_name=task_name, enable_ik=False, lookahead = 10,
+                        record_dir=".", use_fingering_emb=False,
                         use_midi=False)
-        
+
         timestep = env.reset()
         lh_current, rh_current = env.get_fingertip_pos()
 
         step_idx = 0
         current_fingertip = np.concatenate((lh_current, rh_current), axis=0).flatten()
-        obs = get_flattend_obs(timestep, 
-                                lookahead=3, 
-                                exclude_keys=['fingering', 'prior_action'], 
+        obs = get_flattend_obs(timestep,
+                                lookahead=3,
+                                exclude_keys=['fingering', 'prior_action'],
                                 encoder=encoder, sampling=False,
                                 concatenate_keys=['goal', 'demo']
                                 )
-        
+
         obs_deque = collections.deque(
             [obs] * obs_horizon, maxlen=obs_horizon)
 
@@ -212,9 +212,9 @@ def main() -> None:
                     step_idx += 1
                     if step_idx < left_hand_action_list.shape[0]:
                         # hl_command = traj[step_idx].flatten()
-                        obs = get_flattend_obs(timestep, 
-                            lookahead=3, 
-                            exclude_keys=['fingering', 'prior_action'], 
+                        obs = get_flattend_obs(timestep,
+                            lookahead=3,
+                            exclude_keys=['fingering', 'prior_action'],
                             encoder=encoder, sampling=False,
                             concatenate_keys=['goal', 'demo']
                             )

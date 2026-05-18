@@ -30,7 +30,7 @@ class ConditionalConv1dBlock(nn.Module):
             nn.Mish(),
             nn.Unflatten(-1, (-1, 1)),
         )
-    
+
     def forward(self, x, cond):
         # x: (B, C, T)
         # cond: (B, cond_dim)
@@ -43,10 +43,10 @@ class ConditionalConv1dBlock(nn.Module):
         return x
 
 class VariationalEncoder(nn.Module):
-    def __init__(self, 
-                 input_dim=88, 
-                 input_channel=1, 
-                 latent_dim=16, 
+    def __init__(self,
+                 input_dim=88,
+                 input_channel=1,
+                 latent_dim=16,
                  h_channels=[2, 4, 8, 16],
                  beta=1e-5,
                  device="cuda"):
@@ -73,13 +73,13 @@ class VariationalEncoder(nn.Module):
         self.N.scale = self.N.scale.to(device)
         self.kl = 0
         self.beta = beta
-    
+
     def get_conv_out_size(self):
         x = torch.randn((1, self.input_channel, self.input_dim))
         x = self.encoder(x)
         return x.numel(), x.shape[-1]
-        
-    def forward(self, 
+
+    def forward(self,
                 x: torch.Tensor) -> torch.Tensor:
         # (B, T, C) to (B, C, T)
         x = x.moveaxis(-1,-2)
@@ -113,10 +113,10 @@ class VariationalEncoder(nn.Module):
         return z
 
 class Conv1dEncoder(nn.Module):
-    def __init__(self, 
+    def __init__(self,
                  horizon=10,
-                 input_dim=16,  
-                 latent_dim=16, 
+                 input_dim=16,
+                 latent_dim=16,
                  cond_dim=36,
                  h_channels=[32, 64, 128],
                  beta=1e-5,
@@ -145,13 +145,13 @@ class Conv1dEncoder(nn.Module):
         self.N.scale = self.N.scale.to(device)
         self.kl = 0
         self.beta = beta
-        
+
     def get_conv_out_size(self):
         x = torch.randn((1, self.input_dim, self.horizon))
         x = self.encoder(x)
         return x.numel(), x.shape[-1]
-    
-    def forward(self, 
+
+    def forward(self,
                 x: torch.Tensor,
                 cond=None) -> torch.Tensor:
         x = self.encoder(x)
@@ -171,10 +171,10 @@ class Conv1dEncoder(nn.Module):
         return z
 
 class TransformerEncoder(nn.Module):
-    def __init__(self, 
+    def __init__(self,
                  horizon=10,
-                 input_dim=16,  
-                 latent_dim=16, 
+                 input_dim=16,
+                 latent_dim=16,
                  cond_dim=36,
                  beta=1e-5,
                  device="cuda"):
@@ -185,9 +185,9 @@ class TransformerEncoder(nn.Module):
         self.encoder = vae.transformer.Decoder(
                         embedding=vae.transformer.Embeddings(input_dim, 16),
                         positional_encoding=vae.transformer.PositionalEncoding(16, 0.1),
-                        layer=vae.transformer.DecoderLayer(16, 
-                                                 vae.transformer.MultiHeadedAttention(4, 16), 
-                                                 vae.transformer.PositionwiseFeedForward(16, 128), 0.1), 
+                        layer=vae.transformer.DecoderLayer(16,
+                                                 vae.transformer.MultiHeadedAttention(4, 16),
+                                                 vae.transformer.PositionwiseFeedForward(16, 128), 0.1),
                         N=4)
         self.fc_mu = nn.Linear(input_dim+cond_dim, latent_dim)
         self.fc_var = nn.Linear(input_dim+cond_dim, latent_dim)
@@ -198,8 +198,8 @@ class TransformerEncoder(nn.Module):
         self.N.scale = self.N.scale.to(device)
         self.kl = 0
         self.beta = beta
-        
-    def forward(self, 
+
+    def forward(self,
                 x: torch.Tensor,
                 cond=None) -> torch.Tensor:
         # print(x.shape)
@@ -219,9 +219,9 @@ class TransformerEncoder(nn.Module):
         z = mu + sigma*self.N.sample(mu.shape)
         self.kl = self.beta*(sigma**2 + mu**2 - torch.log(sigma) - 1/2).sum()
         return z
-    
+
 class TransformerDecoder(nn.Module):
-    def __init__(self, 
+    def __init__(self,
                  horizon=10,
                  latent_dim=16,
                  cond_dim=36,
@@ -246,7 +246,7 @@ class TransformerDecoder(nn.Module):
         self.final_layer = nn.Sequential(
             nn.Linear(mid_dims[-1], output_dim),
         )
-    def forward(self, 
+    def forward(self,
                 z: torch.Tensor,
                 cond=None) -> torch.Tensor:
         # Concatenate z and cond
@@ -258,12 +258,12 @@ class TransformerDecoder(nn.Module):
         x = self.final_layer(x)
         # print(x.shape)
         return x
-    
+
 class TransformerAutoencoder(nn.Module):
-    def __init__(self, 
+    def __init__(self,
                  horizon=10,
-                 input_dim=16,  
-                 latent_dim=16, 
+                 input_dim=16,
+                 latent_dim=16,
                  output_dim=36,
                  device="cuda"):
         super(TransformerAutoencoder, self).__init__()
@@ -274,8 +274,8 @@ class TransformerAutoencoder(nn.Module):
         self.encoder = Conv1dEncoder(horizon=horizon, input_dim=input_dim, latent_dim=latent_dim, device=device)
         self.decoder = TransformerDecoder(horizon=horizon, latent_dim=latent_dim, output_dim=output_dim, device=device)
         self.device = device
-        
-    def forward(self, 
+
+    def forward(self,
                 x: torch.Tensor,
                 cond: torch.Tensor) -> torch.Tensor:
         # print(x.shape)
@@ -284,8 +284,8 @@ class TransformerAutoencoder(nn.Module):
         x = self.decoder(x)
         # print(x.shape)
         return x
-    
-    def forward_without_sampling(self, 
+
+    def forward_without_sampling(self,
                 x: torch.Tensor) -> torch.Tensor:
         # print(x.shape)
         x = self.encoder.forward_without_sampling(x)
@@ -296,10 +296,10 @@ class TransformerAutoencoder(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, 
-                 input_dim=88, 
-                 input_channel=1, 
-                 latent_dim=16, 
+    def __init__(self,
+                 input_dim=88,
+                 input_channel=1,
+                 latent_dim=16,
                  h_channels=[2, 4, 8, 16],
                  device="cuda"):
         super(Encoder, self).__init__()
@@ -319,13 +319,13 @@ class Encoder(nn.Module):
         conv_out_size, self.final_dim = self.get_conv_out_size()
         self.fc = nn.Linear(conv_out_size, latent_dim)
         self.reg = 0
-    
+
     def get_conv_out_size(self):
         x = torch.randn((1, self.input_channel, self.input_dim))
         x = self.encoder(x)
         return x.numel(), x.shape[-1]
-        
-    def forward(self, 
+
+    def forward(self,
                 x: torch.Tensor) -> torch.Tensor:
         # (B, T, C) to (B, C, T)
         x = x.moveaxis(-1,-2)
@@ -337,8 +337,8 @@ class Encoder(nn.Module):
         z = self.fc(x)
         self.reg = (z**2).sum()
         return z
-    
-    def forward_without_sampling(self, 
+
+    def forward_without_sampling(self,
                                  x: torch.Tensor) -> torch.Tensor:
         # (B, T, C) to (B, C, T)
         x = x.moveaxis(-1,-2)
@@ -381,7 +381,7 @@ class ConditionalDecoder(nn.Module):
             nn.Mish(),
             )
         )
-        
+
         modules.append(nn.Sequential(
             nn.Linear(16, 1),
             nn.BatchNorm1d(1),
@@ -391,7 +391,7 @@ class ConditionalDecoder(nn.Module):
         self.decoder = nn.Sequential(*modules)
 
         self.decoder_fc = nn.Linear(latent_dim, h_channels[0]*final_dim)
-    
+
     def get_deconv_out_size(self):
         x = torch.randn((1, self.h_channels[0], self.final_dim))
         cond = torch.randn((1, 1, self.cond_dim))
@@ -430,7 +430,7 @@ class Decoder(nn.Module):
         for i in range(len(h_channels)-1):
             modules.append(nn.Sequential(
                 nn.ConvTranspose1d(h_channels[i], h_channels[i+1], 3, 2, 1),
-                nn.BatchNorm1d(h_channels[i+1]), 
+                nn.BatchNorm1d(h_channels[i+1]),
                 nn.Mish(),
                 )
             )
@@ -439,10 +439,10 @@ class Decoder(nn.Module):
         self.final_layer = nn.Sequential(
             nn.Linear(deconv_out_size, output_dim),
             nn.BatchNorm1d(h_channels[-1]),
-            nn.Sigmoid(),  
+            nn.Sigmoid(),
         )
         self.decoder_fc = nn.Linear(latent_dim, h_channels[0]*final_dim)
-    
+
     def get_deconv_out_size(self):
         x = torch.randn((1, self.h_channels[0], self.final_dim))
         x = self.decoder(x)
@@ -493,7 +493,7 @@ class Autoencoder(nn.Module):
         else:
             out = self.decoder(z)
             return out
-    
+
     def forward_without_sampling(self, x, q=None):
         # Same as forward
         x = x.to(self.device)
@@ -506,7 +506,6 @@ class Autoencoder(nn.Module):
         else:
             out = self.decoder(z)
             return out
-    
 
 
 
@@ -532,7 +531,7 @@ class VariationalAutoencoder(nn.Module):
         else:
             out = self.decoder(z)
             return out
-    
+
     def forward_without_sampling(self, x, q=None):
         x = x.to(self.device)
         z = self.encoder.forward_without_sampling(x)

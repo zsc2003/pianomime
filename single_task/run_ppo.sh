@@ -28,4 +28,3 @@ WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=egl XLA_PYTHON_CLIENT_PREALLOCATE=false CU
     --total-iters 2000 \
     --residual-factor 0.03 \
     --deepmimic \
-    

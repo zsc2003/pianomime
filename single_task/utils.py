@@ -139,7 +139,7 @@ def get_env(args, record_dir: Optional[Path] = None):
                 residual_factor=args.residual_factor,
                 curriculum=args.curriculum,
             )
-    else:   
+    else:
         task = piano_with_shadow_hands_res.PianoWithShadowHandsResidual(
             midi=music.load(args.mimic_task),
             change_color_on_activation=True,

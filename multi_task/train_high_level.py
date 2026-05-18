@@ -39,7 +39,7 @@ if __name__ == '__main__':
                               action_horizon=action_horizon,
                               dataset_path=dataset_path,
                               normalization=True)
-  
+
     def create_midi_encoder(device='cuda'):
         # TCN for midi encoding
         midi_encoder = VariationalConvMlpEncoder(
@@ -50,7 +50,7 @@ if __name__ == '__main__':
             noise=0.08,
         ).to(device)
         return midi_encoder
-    
+
     # Conditional UNet for noise prediction
     noise_pred_net = ConditionalUnet1D(
         input_dim=action_dim,
@@ -115,7 +115,7 @@ if __name__ == '__main__':
                     # device transfer
                     nobs = nbatch['obs'].to(device)
                     naction = nbatch['action'].to(device)
-                    
+
                     naction = naction.reshape(naction.shape[0], 4, -1)
 
                     # Exclude fingering, the last 10 elements is fingering, the first 36 is fingertip position

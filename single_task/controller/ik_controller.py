@@ -324,24 +324,22 @@ def move_finger_to_key(env: dm_env.Environment, key_index: int, finger_name):
         prefix = "black_key_"
     else:
         raise ValueError(f"Invalid key index: {key_index}")
-    
+
     # Position of the piano joint as the target position
     target_pos = mjcf_utils.safe_find(env.task.piano._mjcf_root, "body", f"{prefix}{key_index}").pos
 
     # Wrist, forearm and the dedicated finger joints are available for IK
     wrist_joint_names = ["lh_shadow_hand/"+"lh_WRJ2",
                             "lh_shadow_hand/"+"lh_WRJ1"]
-    forearm_joint_names = ["lh_shadow_hand/"+env.task._hand.joints[-2].name, 
+    forearm_joint_names = ["lh_shadow_hand/"+env.task._hand.joints[-2].name,
                             "lh_shadow_hand/"+env.task._hand.joints[-1].name]
     finger_joint_names = [env.physics.model.id2name(FINGER_BASE_IDX[finger_name]+i, 'joint') for i in range(FINGER_JOINTS[finger_name])]
     joint_names = forearm_joint_names + finger_joint_names + wrist_joint_names
-    
+
     # Calculate the IK result
-    ik_result = ik.qpos_from_site_pose(physics=env.physics, 
-                                       site_name="lh_shadow_hand/"+finger_name+"distal_site", 
+    ik_result = ik.qpos_from_site_pose(physics=env.physics,
+                                       site_name="lh_shadow_hand/"+finger_name+"distal_site",
                                        target_pos=target_pos,
                                        joint_names=joint_names,
                                        )
     return ik_result
-    
-    

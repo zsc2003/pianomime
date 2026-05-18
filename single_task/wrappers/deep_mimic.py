@@ -65,7 +65,7 @@ class DeepMimicWrapper_Old(EnvironmentWrapper):
         self._reference_frame_idx = 0
         self._demonstrations_length = self._demonstrations.shape[0]
         self._action_divergence_termination = False
-    
+
     def observation_spec(self):
         return self._observation_spec
 
@@ -80,7 +80,7 @@ class DeepMimicWrapper_Old(EnvironmentWrapper):
         self.end_effector_mimic_rew = 0
         self._reference_frame_idx = 0
         return self._remove_goal_observation(self._add_demo_observation(timestep))
-    
+
     def _compute_end_effector_pos_mimic_reward(self, physics: mjcf.Physics) -> float:
         """Computes the reward for matching the end effector positions."""
         if self._disable_joints_pos_mimic_reward:
@@ -130,7 +130,7 @@ class DeepMimicWrapper_Old(EnvironmentWrapper):
             self.task._reward_fn.add("joints_pos_mimic", self._compute_joints_pos_mimic_reward)
         if not self._disable_end_effector_pos_mimic_reward:
             self.task._reward_fn.add("end_effector_pos_mimic", self._compute_end_effector_pos_mimic_reward)
-    
+
     def _remove_goal_observation(self, timestep: dm_env.TimeStep) -> dm_env.TimeStep:
         if self._remove_goal_obs:
             timestep.observation.pop("goal")
@@ -145,7 +145,7 @@ class DeepMimicWrapper_Old(EnvironmentWrapper):
                 timestep.observation, **{"demo": demo}
             )
         )
-    
+
     def get_deepmimic_rews(self):
         if self._disable_joints_pos_mimic_reward and self._disable_end_effector_pos_mimic_reward:
             return {}
@@ -220,7 +220,7 @@ class DeepMimicWrapper(EnvironmentWrapper):
                                                self._environment.task.control_timestep))
         self._demonstrations_length = self._demonstrations_lh.shape[0]
         self._action_divergence_termination = False
-    
+
     def observation_spec(self):
         return self._observation_spec
 
@@ -246,7 +246,7 @@ class DeepMimicWrapper(EnvironmentWrapper):
         lh_current = np.concatenate((lh_wrist, lh_fingertips))
         rh_current = np.concatenate((rh_wrist, rh_fingertips))
         return lh_current, rh_current
-    
+
     def _compute_end_effector_pos_mimic_reward(self, physics: mjcf.Physics) -> float:
         """Computes the reward for matching the end effector positions."""
         # Give full reward when it is at initial buffer time.
@@ -294,7 +294,7 @@ class DeepMimicWrapper(EnvironmentWrapper):
 
     def _add_deep_mimic_rewards(self):
         self.task._reward_fn.add("end_effector_pos_mimic", self._compute_end_effector_pos_mimic_reward)
-    
+
     def _remove_goal_observation(self, timestep: dm_env.TimeStep) -> dm_env.TimeStep:
         if self._remove_goal_obs:
             timestep.observation.pop("goal")
@@ -318,11 +318,11 @@ class DeepMimicWrapper(EnvironmentWrapper):
                 demo_rh[i-self._reference_frame_idx] = self._demonstrations_rh[i].T
         return timestep._replace(
             observation=collections.OrderedDict(
-                timestep.observation, **{"demo_lh": demo_lh.flatten(), 
+                timestep.observation, **{"demo_lh": demo_lh.flatten(),
                                         "demo_rh": demo_rh.flatten()}
             )
         )
-    
+
     def get_deepmimic_rews(self):
         return {
             "end_effector_pos_mimic_rew": self.end_effector_mimic_rew,
