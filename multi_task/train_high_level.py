@@ -20,7 +20,8 @@ from dataset import RoboPianistDataset, read_dataset
 import sys
 import time
 import wandb
-import sys
+import os
+
 
 if __name__ == '__main__':
     pred_horizon = 1
@@ -181,6 +182,9 @@ if __name__ == '__main__':
 
                 # Specify the path to save the EMA model's weights
                 ema_model_weights_path = 'diffusion/ckpts/checkpoint_{}_without_fingering.ckpt'.format(run_name)
+
+                # Create parent directory if it does not exist
+                os.makedirs(os.path.dirname(ema_model_weights_path), exist_ok=True)
 
                 # Save the EMA model's weights to the specified path
                 torch.save(ema_model_state_dict, ema_model_weights_path)
