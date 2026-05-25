@@ -3,3 +3,5 @@ dataset*
 robopianist_rl/
 third_party/
 *.pyc
+.vscode/
+*.pdf
