@@ -45,7 +45,7 @@ if __name__ == '__main__':
         torch.manual_seed(seed)
         np.random.seed(seed)
 
-        dataset_path = "pianomime/dataset_hl.zarr"
+        dataset_path = "./dataset_hl.zarr"
 
         device = torch.device('cuda')
 
@@ -85,7 +85,9 @@ if __name__ == '__main__':
             midi_encoder=create_midi_encoder,
         ).to(device)
 
-        ckpt_path = "checkpoint_high_level.ckpt"
+        # ckpt_path = "checkpoint_high_level.ckpt"
+        ckpt_path = "./reproduced_ckpt/dataset_hl_without_fingering.ckpt"
+
         state_dict = torch.load(ckpt_path, map_location='cuda')
         ema_noise_pred_net = noise_pred_net
         ema_noise_pred_net.load_state_dict(state_dict)

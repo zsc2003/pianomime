@@ -61,7 +61,9 @@ def main() -> None:
     recalls = []
     f1s = []
 
-    dataset_path = "pianomime/dataset_ll.zarr"
+    # dataset_path = "pianomime/dataset_ll.zarr"
+    dataset_path = "./dataset_ll.zarr"
+
     dataloader, stats = read_dataset(pred_horizon=pred_horizon,
                             obs_horizon=obs_horizon,
                             action_horizon=action_horizon,
@@ -77,7 +79,8 @@ def main() -> None:
         cond_dim=64,
         ).to('cuda')
 
-    ckpt_path = "checkpoint_ae.ckpt"
+    # ckpt_path = "checkpoint_ae.ckpt"
+    ckpt_path = "./reproduced_ckpt/checkpoint_ae.ckpt"
     state_dict = torch.load(ckpt_path, map_location='cuda')
     ae.load_state_dict(state_dict)
     encoder = ae.encoder
@@ -102,7 +105,8 @@ def main() -> None:
         freeze_encoder=False,
     ).to(device)
 
-    ckpt_path = "checkpoint_low_level.ckpt"
+    # ckpt_path = "checkpoint_low_level.ckpt"
+    ckpt_path = "./reproduced_ckpt/dataset_ll.ckpt"
 
     state_dict = torch.load(ckpt_path, map_location='cuda')
     ema_noise_pred_net = noise_pred_net
@@ -111,8 +115,9 @@ def main() -> None:
     for i in range(1):
         left_hand_action_list = np.load('pianomime/multi_task/trajectories/{}_left_hand_action_list.npy'.format(task_name))
         max_steps = left_hand_action_list.shape[0]
+        # enable_ik=True: -res,  enable_ik=False, oridinary two-stage diff
         env = get_env_ll(task_name=task_name, enable_ik=False, lookahead = 10,
-                        record_dir=".", use_fingering_emb=False,
+                        record_dir=None, use_fingering_emb=False,
                         use_midi=False)
 
         timestep = env.reset()
