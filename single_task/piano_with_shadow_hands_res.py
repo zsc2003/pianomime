@@ -69,6 +69,10 @@ class PianoWithShadowHandsResidual(base.PianoTask):
         curriculum: bool = False,
         shift: int = 0,
         enable_joints_vel_obs: bool = False,
+        smoothness_weight: float = 1.0,
+        beta_action: float = 1.0,
+        beta_accel: float = 1.0,
+        disable_smoothness_reward: bool = False,
         **kwargs,
     ) -> None:
         """Task constructor.
@@ -109,6 +113,10 @@ class PianoWithShadowHandsResidual(base.PianoTask):
             curriculum: If True, use curriculum learning.
             shift: The number of notes to shift the MIDI file by.
             enable_joints_vel_obs: If True, enable the joint velocity observation.
+            smoothness_weight: Weight for the smoothness reward.
+            beta_action: Coefficient for action smoothness penalty.
+            beta_accel: Coefficient for joint acceleration penalty.
+            disable_smoothness_reward: If True, disables the smoothness reward.
         """
         super().__init__(arena=stage.Stage(), **kwargs)
         if note_trajectory is None and midi is None:
@@ -147,6 +155,10 @@ class PianoWithShadowHandsResidual(base.PianoTask):
         self._curriculum_length = 100 # initial curriculum length (5 seconds)
         self._shift = shift
         self._enable_joints_vel_obs = enable_joints_vel_obs
+        self._smoothness_weight = smoothness_weight
+        self._beta_action = beta_action
+        self._beta_accel = beta_accel
+        self._disable_smoothness_reward = disable_smoothness_reward
 
         if not disable_fingering_reward and not disable_colorization:
             self._colorize_fingertips()
@@ -167,11 +179,19 @@ class PianoWithShadowHandsResidual(base.PianoTask):
             self._reward_fn.add("fingering_reward", self._compute_fingering_reward)
         if not self._disable_forearm_reward:
             self._reward_fn.add("forearm_reward", self._compute_forearm_reward)
+        if not self._disable_smoothness_reward:
+            self._reward_fn.add("smoothness_reward", self._compute_smoothness_reward)
 
     def _reset_quantities_at_episode_init(self) -> None:
         self._t_idx: int = 0
         self._should_terminate: bool = False
         self._discount: float = 1.0
+        # Smoothness reward tracking
+        self._current_action = None
+        self._prev_action = None
+        self._current_qpos = None
+        self._prev_qpos = None
+        self._prev_prev_qpos = None
 
     def _maybe_change_midi(self, random_state: np.random.RandomState) -> None:
         if self._augmentations is not None:
@@ -221,6 +241,9 @@ class PianoWithShadowHandsResidual(base.PianoTask):
         random_state: np.random.RandomState,
     ) -> None:
         """Applies the control to the hands and the sustain pedal to the piano."""
+        # Track action for smoothness reward
+        self._prev_action = self._current_action.copy() if self._current_action is not None else None
+        self._current_action = action.copy()
         action_right, action_left = np.split(action[:-1], 2)
         action_right[-3] += piano_constants.WHITE_KEY_WIDTH * self._shift * 7
         action_left[-3] += piano_constants.WHITE_KEY_WIDTH * self._shift * 7
@@ -234,6 +257,13 @@ class PianoWithShadowHandsResidual(base.PianoTask):
     ) -> None:
         del random_state  # Unused.
         self._t_idx += 1
+        # Track joint positions for smoothness reward
+        lh_qpos = self.left_hand.observables.joints_pos(physics).copy()
+        rh_qpos = self.right_hand.observables.joints_pos(physics).copy()
+        current_qpos = np.concatenate([lh_qpos, rh_qpos])
+        self._prev_prev_qpos = self._prev_qpos.copy() if self._prev_qpos is not None else None
+        self._prev_qpos = self._current_qpos.copy() if self._current_qpos is not None else None
+        self._current_qpos = current_qpos
         self._should_terminate = (self._t_idx - 1) == len(self._notes) - 1
         if self._curriculum:
             self._should_terminate = self._should_terminate or self._t_idx == self._curriculum_length
@@ -387,6 +417,42 @@ class PianoWithShadowHandsResidual(base.PianoTask):
         )
         # return float(np.mean(rews))
         return 0.0
+
+    def _compute_smoothness_reward(self, physics: mjcf.Physics) -> float:
+        """Reward for smooth actions and joint trajectories.
+        
+        r_smooth = exp(-beta_action * ||a_t[0:46] - a_{t-1}[0:46]||^2 
+                       - beta_accel * ||q_t - 2*q_{t-1} + q_{t-2}||^2)
+        
+        Returns 0.0 for the first 2 timesteps (insufficient history).
+        """
+        del physics  # Joint positions already tracked in after_step.
+        
+        # Action rate penalty: ||a_t[0:46] - a_{t-1}[0:46]||^2 (exclude sustain pedal)
+        if self._current_action is None or self._prev_action is None:
+            return 0.0
+        
+        assert self._current_action.shape == (47,), (
+            f"Expected action shape (47,), got {self._current_action.shape}"
+        )
+        action_diff = self._current_action[:-1] - self._prev_action[:-1]  # Exclude sustain
+        action_rate = np.sum(action_diff ** 2)
+        
+        # Acceleration penalty: ||q_t - 2*q_{t-1} + q_{t-2}||^2
+        if self._current_qpos is None or self._prev_qpos is None or self._prev_prev_qpos is None:
+            accel_penalty = 0.0
+        else:
+            assert self._current_qpos.shape == (54,), (
+                f"Expected qpos shape (54,), got {self._current_qpos.shape}"
+            )
+            accel = self._current_qpos - 2.0 * self._prev_qpos + self._prev_prev_qpos
+            accel_penalty = np.sum(accel ** 2)
+        
+        smoothness = np.exp(
+            -self._beta_action * action_rate - self._beta_accel * accel_penalty
+        )
+        
+        return self._smoothness_weight * smoothness
 
     def _update_goal_state(self) -> None:
         # Observable callables get called after `after_step` but before

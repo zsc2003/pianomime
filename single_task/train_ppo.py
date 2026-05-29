@@ -38,6 +38,7 @@ from stable_baselines3.common.monitor import Monitor
 
 import pickle
 import shutil
+from torch.utils.tensorboard import SummaryWriter
 
 
 @dataclass(frozen=True)
@@ -96,6 +97,10 @@ class Args:
     rsi: bool = False
     curriculum: bool = False
     total_iters: int = 1000
+    smoothness_weight: float = 1.0
+    beta_action: float = 1.0
+    beta_accel: float = 1.0
+    disable_smoothness_reward: bool = False
 
 def prefix_dict(prefix: str, d: dict) -> dict:
     return {f"{prefix}/{k}": v for k, v in d.items()}
@@ -150,6 +155,10 @@ def main(args: Args) -> None:
         # Reload learning rate scheduler
         custom_objects = { 'learning_rate': lr_scheduler_instance.lr_schedule}
         model = PPO.load(args.pretrained, env=vec_env, custom_objects=custom_objects)
+
+    tb_eval_dir = f"./robopianist_rl/tensorboard/{run_name}/eval"
+    writer = SummaryWriter(log_dir=tb_eval_dir)
+
     best_f1 = -np.inf
     # last_extending_curriculum_step = 0
     try:
@@ -168,9 +177,17 @@ def main(args: Args) -> None:
                     break
             log_dict = prefix_dict("eval", eval_env.env.get_statistics())
             music_dict = prefix_dict("eval", eval_env.env.get_musical_metrics())
-            # wandb.log(log_dict | music_dict, step=i)
-            # if args.deepmimic:
-                # wandb.log(prefix_dict("eval", eval_env.env.get_deepmimic_rews()), step=i)
+            for k, v in (log_dict | music_dict).items():
+                writer.add_scalar(k, v, global_step=i)
+            if args.deepmimic:
+                deepmimic_dict = prefix_dict("eval", eval_env.env.get_deepmimic_rews())
+                for k, v in deepmimic_dict.items():
+                    writer.add_scalar(k, v, global_step=i)
+            if hasattr(eval_env.env, 'task') and hasattr(eval_env.env.task, '_reward_fn'):
+                reward_terms = eval_env.env.task._reward_fn.reward_terms
+                for k, v in reward_terms.items():
+                    writer.add_scalar(f"eval/reward_{k}", v, global_step=i)
+            writer.add_scalar("train/lr", lr_scheduler_instance.lr, global_step=i)
             f1 = eval_env.env.get_musical_metrics()["f1"]
             if f1 > best_f1:
                 print("best_f1:{}->{}".format(best_f1, eval_env.env.get_musical_metrics()["f1"]))
@@ -182,6 +199,8 @@ def main(args: Args) -> None:
             eval_env.env.latest_filename.unlink()
     except KeyboardInterrupt:
         pass
+
+    writer.close()
 
     # model.save("./robopianist_rl/ckpts/{}".format(run_name))
 

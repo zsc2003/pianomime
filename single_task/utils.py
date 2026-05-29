@@ -138,6 +138,10 @@ def get_env(args, record_dir: Optional[Path] = None):
                 reduced_action_space=False,
                 residual_factor=args.residual_factor,
                 curriculum=args.curriculum,
+                smoothness_weight=args.smoothness_weight,
+                beta_action=args.beta_action,
+                beta_accel=args.beta_accel,
+                disable_smoothness_reward=args.disable_smoothness_reward,
             )
     else:
         task = piano_with_shadow_hands_res.PianoWithShadowHandsResidual(
@@ -154,6 +158,10 @@ def get_env(args, record_dir: Optional[Path] = None):
             gravity_compensation=True,
             reduced_action_space=False,
             residual_factor=args.residual_factor,
+            smoothness_weight=args.smoothness_weight,
+            beta_action=args.beta_action,
+            beta_accel=args.beta_accel,
+            disable_smoothness_reward=args.disable_smoothness_reward,
         )
 
     env = composer_utils.Environment(
