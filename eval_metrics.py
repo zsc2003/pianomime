@@ -1,35 +1,26 @@
 #!/usr/bin/env python3
-"""
-Run one-song PianoMime generalist evaluation without video recording.
+"""Run one-song PianoMime generalist evaluation with explicit checkpoint paths.
 
-Expected layout:
+This version supports both the original DDPM generalist and the new flow-matching
+replacement. It intentionally does not rely on symlinks or a fixed reproduced_ckpt/
+directory layout; pass the three checkpoints explicitly.
 
-workspace/
-├── pianomime/
-│   ├── eval_one_generalist_no_video.py   # put this file here
-│   ├── multi_task/
-│   ├── dataset_hl.zarr/
-│   └── dataset_ll.zarr/
-├── dataset/
-│   ├── notes/
-│   └── notes_test/
-└── reproduced_ckpt/
-    ├── checkpoint_ae.ckpt
-    ├── checkpoint_high_level.ckpt
-    └── checkpoint_low_level.ckpt
+Examples from the workspace directory:
 
-Usage from workspace:
-    python pianomime/eval_one_generalist_no_video.py YourSongName
+DDPM baseline:
+    CUDA_VISIBLE_DEVICES=5 python pianomime/eval_metrics.py TwinkleTwinkleRousseau \
+      --policy ddpm \
+      --ae-ckpt reproduced_ckpt/checkpoint_ae.ckpt \
+      --high-level-ckpt reproduced_ckpt/dataset_hl_without_fingering.ckpt \
+      --low-level-ckpt reproduced_ckpt/dataset_ll.ckpt
 
-Usage from workspace/pianomime:
-    python eval_one_generalist_no_video.py YourSongName
-
-The original eval scripts hard-code checkpoint paths as:
-    checkpoint_ae.ckpt
-    checkpoint_high_level.ckpt
-    checkpoint_low_level.ckpt
-under workspace/. This script creates root-level symlinks pointing to
-workspace/reproduced_ckpt/*.ckpt before running eval.
+Flow matching:
+    CUDA_VISIBLE_DEVICES=5 python pianomime/eval_metrics.py TwinkleTwinkleRousseau \
+      --policy flow \
+      --ae-ckpt reproduced_ckpt/checkpoint_ae.ckpt \
+      --high-level-ckpt flow/ckpts/checkpoint_FM-HL-dataset_hl_without_fingering.ckpt \
+      --low-level-ckpt flow/ckpts/checkpoint_FM-LL-dataset_ll.ckpt \
+      --flow-steps 20
 """
 
 from __future__ import annotations
@@ -45,18 +36,13 @@ from pathlib import Path
 from typing import Optional
 
 
-
 conda_prefix = os.environ.get("CONDA_PREFIX")
 if conda_prefix:
     os.environ["LD_LIBRARY_PATH"] = f"{conda_prefix}/lib:" + os.environ.get("LD_LIBRARY_PATH", "")
     os.environ["LD_PRELOAD"] = f"{conda_prefix}/lib/libstdc++.so.6"
 
 
-# Edit this if you prefer running without a command-line song argument.
-SONG_NAME = "Petrunko_3"
-
-# Default checkpoint directory relative to workspace/.
-DEFAULT_CKPT_DIRNAME = "reproduced_ckpt"
+DEFAULT_SONG_NAME = "Petrunko_3"
 
 
 def repo_and_workspace() -> tuple[Path, Path]:
@@ -66,34 +52,11 @@ def repo_and_workspace() -> tuple[Path, Path]:
     return repo_dir, workspace_dir
 
 
-def patch_low_level_no_video(repo_dir: Path) -> None:
-    """Disable video/audio recording in multi_task/eval_low_level.py."""
-    path = repo_dir / "multi_task" / "eval_low_level.py"
-    if not path.exists():
-        raise FileNotFoundError(f"Cannot find {path}")
-
-    text = path.read_text()
-    original = text
-
-    replacements = {
-        'record_dir=".",': 'record_dir=None,',
-        "record_dir='.',": 'record_dir=None,',
-        'record_dir = ".",': 'record_dir=None,',
-        "record_dir = '.',": 'record_dir=None,',
-    }
-    for old, new in replacements.items():
-        text = text.replace(old, new)
-
-    if text != original:
-        path.write_text(text)
-        print(f"[patch] Disabled video recording in {path}")
-    elif "record_dir=None" in text:
-        print(f"[patch] Video recording already disabled in {path}")
-    else:
-        print(
-            f"[warn] Did not find record_dir='.' in {path}. "
-            "Please check manually that get_env_ll(..., record_dir=None, ...) is used."
-        )
+def resolve_path(workspace_dir: Path, path_arg: str) -> Path:
+    path = Path(path_arg)
+    if not path.is_absolute():
+        path = workspace_dir / path
+    return path.resolve()
 
 
 def require_path(path: Path, message: str) -> None:
@@ -101,62 +64,20 @@ def require_path(path: Path, message: str) -> None:
         raise FileNotFoundError(f"{message}: {path}")
 
 
-def resolve_ckpt_dir(workspace_dir: Path, ckpt_dir_arg: str) -> Path:
-    ckpt_dir = Path(ckpt_dir_arg)
-    if not ckpt_dir.is_absolute():
-        ckpt_dir = workspace_dir / ckpt_dir
-    return ckpt_dir.resolve()
-
-
-def ensure_root_checkpoint_links(workspace_dir: Path, ckpt_dir: Path, force: bool = False) -> None:
-    """
-    Original eval scripts load checkpoints from workspace root. Create symlinks:
-        workspace/checkpoint_*.ckpt -> workspace/reproduced_ckpt/checkpoint_*.ckpt
-    """
-    require_path(ckpt_dir, "Missing checkpoint directory")
-
-    names = [
-        "checkpoint_ae.ckpt",
-        "dataset_hl_without_fingering.ckpt",
-        "dataset_ll.ckpt",
-    ]
-
-    for name in names:
-        target = ckpt_dir / name
-        link = workspace_dir / name
-        require_path(target, "Missing checkpoint")
-
-        if link.exists() or link.is_symlink():
-            try:
-                if link.resolve() == target.resolve():
-                    print(f"[ckpt] root checkpoint already points to {target}")
-                    continue
-            except FileNotFoundError:
-                pass
-
-            if link.is_symlink():
-                link.unlink()
-            elif force:
-                backup = workspace_dir / f"{name}.bak_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-                link.rename(backup)
-                print(f"[ckpt] Existing {link} backed up to {backup}")
-            else:
-                raise FileExistsError(
-                    f"{link} already exists and does not point to {target}.\n"
-                    "Either remove it manually, or rerun with --force-root-ckpt-links."
-                )
-
-        link.symlink_to(target)
-        print(f"[ckpt] {link} -> {target}")
-
-
-def check_required_paths(repo_dir: Path, workspace_dir: Path, ckpt_dir: Path, song: str) -> None:
-    require_path(ckpt_dir / "checkpoint_ae.ckpt", "Missing AE checkpoint")
-    require_path(ckpt_dir / "dataset_hl_without_fingering.ckpt", "Missing high-level checkpoint")
-    require_path(ckpt_dir / "dataset_ll.ckpt", "Missing low-level checkpoint")
-
-    require_path(workspace_dir / "dataset_hl.zarr", "Missing high-level zarr dataset")
-    require_path(workspace_dir / "dataset_ll.zarr", "Missing low-level zarr dataset")
+def check_required_paths(
+    workspace_dir: Path,
+    song: str,
+    ae_ckpt: Path,
+    high_level_ckpt: Path,
+    low_level_ckpt: Path,
+    dataset_hl: Path,
+    dataset_ll: Path,
+) -> None:
+    require_path(ae_ckpt, "Missing AE checkpoint")
+    require_path(high_level_ckpt, "Missing high-level checkpoint")
+    require_path(low_level_ckpt, "Missing low-level checkpoint")
+    require_path(dataset_hl, "Missing high-level zarr dataset")
+    require_path(dataset_ll, "Missing low-level zarr dataset")
 
     notes_train = workspace_dir / "dataset" / "notes" / f"{song}.pkl"
     notes_test = workspace_dir / "dataset" / "notes_test" / f"{song}.pkl"
@@ -166,23 +87,21 @@ def check_required_paths(repo_dir: Path, workspace_dir: Path, ckpt_dir: Path, so
             f"  {notes_train}\n"
             f"  {notes_test}"
         )
-
     if notes_train.exists() and notes_test.exists():
         print(
             f"[warn] {song}.pkl exists in both dataset/notes and dataset/notes_test. "
-            "The original code usually loads dataset/notes first."
+            "The environment loader usually tries dataset/notes first."
         )
 
 
-def remove_old_trajectories(repo_dir: Path, song: str) -> None:
-    traj_dir = repo_dir / "multi_task" / "trajectories"
-    traj_dir.mkdir(parents=True, exist_ok=True)
+def remove_old_trajectories(trajectory_dir: Path, song: str) -> None:
+    trajectory_dir.mkdir(parents=True, exist_ok=True)
     for name in [
         f"{song}_trajectory.npy",
         f"{song}_left_hand_action_list.npy",
         f"{song}_right_hand_action_list.npy",
     ]:
-        path = traj_dir / name
+        path = trajectory_dir / name
         if path.exists():
             path.unlink()
             print(f"[clean] Removed old trajectory: {path}")
@@ -194,8 +113,12 @@ def build_env(args: argparse.Namespace) -> dict[str, str]:
     env.setdefault("WANDB_MODE", "disabled")
     env.setdefault("MUJOCO_GL", "egl")
     env.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
-    env["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
-    env["MUJOCO_EGL_DEVICE_ID"] = str(args.egl_device)
+
+    # Keep external CUDA_VISIBLE_DEVICES=... by default. Override only when --gpu is passed.
+    if args.gpu is not None:
+        env["CUDA_VISIBLE_DEVICES"] = str(args.gpu)
+    if args.egl_device is not None:
+        env["MUJOCO_EGL_DEVICE_ID"] = str(args.egl_device)
     return env
 
 
@@ -244,15 +167,26 @@ def append_result_csv(csv_path: Path, row: dict[str, object]) -> None:
     write_header = not csv_path.exists()
     fieldnames = [
         "timestamp",
+        "label",
+        "policy",
         "song",
         "precision",
         "recall",
         "f1",
         "high_level_status",
         "low_level_status",
-        "ckpt_dir",
+        "ae_ckpt",
+        "high_level_ckpt",
+        "low_level_ckpt",
+        "dataset_hl",
+        "dataset_ll",
         "high_level_log",
         "low_level_log",
+        "flow_steps",
+        "flow_solver",
+        "flow_clip_mode",
+        "ddpm_hl_iters",
+        "ddpm_ll_iters",
     ]
     with csv_path.open("a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
@@ -261,54 +195,123 @@ def append_result_csv(csv_path: Path, row: dict[str, object]) -> None:
         writer.writerow(row)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Run PianoMime one-song two-stage generalist evaluation without video."
-    )
-    parser.add_argument(
-        "song",
-        nargs="?",
-        default=SONG_NAME,
-        help="Song name without .pkl. If omitted, uses SONG_NAME inside this script.",
-    )
-    parser.add_argument(
-        "--ckpt-dir",
-        default=DEFAULT_CKPT_DIRNAME,
-        help="Checkpoint directory relative to workspace, or absolute path. Default: reproduced_ckpt",
-    )
-    parser.add_argument("--gpu", default="0", help="CUDA_VISIBLE_DEVICES value. Default: 0")
-    parser.add_argument(
-        "--egl-device",
-        default=None,
-        help="MUJOCO_EGL_DEVICE_ID value. Default: same as --gpu",
-    )
-    parser.add_argument(
-        "--force-root-ckpt-links",
-        action="store_true",
-        help=(
-            "If workspace/checkpoint_*.ckpt already exists and is not the desired symlink, "
-            "back it up and create the symlink."
-        ),
-    )
-    parser.add_argument(
-        "--keep-traj",
-        action="store_true",
-        help="Do not delete existing generated high-level trajectories before evaluation.",
-    )
-    parser.add_argument(
-        "--skip-high-level",
-        action="store_true",
-        help="Skip eval_high_level.py and reuse existing trajectories under pianomime/multi_task/trajectories/.",
-    )
-    parser.add_argument(
-        "--no-patch",
-        action="store_true",
-        help="Do not patch eval_low_level.py. Use only if you already set record_dir=None manually.",
-    )
-    args = parser.parse_args()
+def build_commands(
+    args: argparse.Namespace,
+    repo_dir: Path,
+    song: str,
+    ae_ckpt: Path,
+    high_level_ckpt: Path,
+    low_level_ckpt: Path,
+    dataset_hl: Path,
+    dataset_ll: Path,
+    trajectory_dir: Path,
+) -> tuple[list[str], list[str]]:
+    if args.policy == "ddpm":
+        high_script = repo_dir / "multi_task" / "eval_high_level.py"
+        low_script = repo_dir / "multi_task" / "eval_low_level.py"
+    else:
+        high_script = repo_dir / "multi_task" / "flow_matching" / "eval_high_level_flow.py"
+        low_script = repo_dir / "multi_task" / "flow_matching" / "eval_low_level_flow.py"
 
-    if args.egl_device is None:
-        args.egl_device = args.gpu
+    require_path(high_script, "Missing high-level evaluation script")
+    require_path(low_script, "Missing low-level evaluation script")
+
+    high_cmd = [
+        sys.executable,
+        str(high_script),
+        song,
+        "--dataset-path",
+        str(dataset_hl),
+        "--ckpt-path",
+        str(high_level_ckpt),
+        "--ae-ckpt",
+        str(ae_ckpt),
+        "--trajectory-dir",
+        str(trajectory_dir),
+        "--lookahead",
+        str(args.lookahead_hl),
+    ]
+    low_cmd = [
+        sys.executable,
+        str(low_script),
+        song,
+        "--dataset-path",
+        str(dataset_ll),
+        "--ckpt-path",
+        str(low_level_ckpt),
+        "--ae-ckpt",
+        str(ae_ckpt),
+        "--trajectory-dir",
+        str(trajectory_dir),
+        "--lookahead",
+        str(args.lookahead_ll),
+    ]
+
+    if args.record_dir:
+        high_cmd += ["--record-dir", args.record_dir]
+        low_cmd += ["--record-dir", args.record_dir]
+    if args.use_midi:
+        high_cmd.append("--use-midi")
+        low_cmd.append("--use-midi")
+    if args.enable_ik:
+        low_cmd.append("--enable-ik")
+
+    if args.policy == "ddpm":
+        high_cmd += ["--num-diffusion-iters", str(args.ddpm_hl_iters)]
+        low_cmd += ["--num-diffusion-iters", str(args.ddpm_ll_iters)]
+    else:
+        flow_extra = [
+            "--num-flow-steps",
+            str(args.flow_steps),
+            "--solver",
+            args.flow_solver,
+            "--clip-mode",
+            args.flow_clip_mode,
+            "--time-scale",
+            str(args.flow_time_scale),
+            "--noise-scale",
+            str(args.flow_noise_scale),
+        ]
+        high_cmd += flow_extra
+        low_cmd += flow_extra
+
+    return high_cmd, low_cmd
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run PianoMime one-song generalist evaluation with explicit ckpt paths.")
+    parser.add_argument("song", nargs="?", default=DEFAULT_SONG_NAME, help="Song name without .pkl")
+    parser.add_argument("--policy", choices=["ddpm", "flow"], required=True, help="Which sampler/eval scripts to use.")
+    parser.add_argument("--ae-ckpt", required=True, help="Path to checkpoint_ae.ckpt")
+    parser.add_argument("--high-level-ckpt", required=True, help="Path to high-level policy ckpt")
+    parser.add_argument("--low-level-ckpt", required=True, help="Path to low-level policy ckpt")
+    parser.add_argument("--dataset-hl", default="dataset_hl.zarr", help="Path to high-level zarr dataset")
+    parser.add_argument("--dataset-ll", default="dataset_ll.zarr", help="Path to low-level zarr dataset")
+    parser.add_argument("--trajectory-dir", default="pianomime/multi_task/trajectories")
+    parser.add_argument("--label", default=None, help="Optional label written to results.csv, e.g. ddpm_100_50 or fm_20.")
+    parser.add_argument("--log-dir", default="logs/generalist_eval_single")
+    parser.add_argument("--gpu", default=None, help="Override CUDA_VISIBLE_DEVICES. By default, keep environment value.")
+    parser.add_argument("--egl-device", default=None, help="Set MUJOCO_EGL_DEVICE_ID. By default, keep environment value.")
+    parser.add_argument("--keep-traj", action="store_true", help="Do not delete existing generated high-level trajectories before evaluation.")
+    parser.add_argument("--skip-high-level", action="store_true", help="Skip high-level eval and reuse existing trajectories.")
+    parser.add_argument("--record-dir", default=None, help="Set to a directory to record video/audio. Default disables recording.")
+    parser.add_argument("--lookahead-hl", type=int, default=10)
+    parser.add_argument("--lookahead-ll", type=int, default=10)
+    parser.add_argument("--enable-ik", action="store_true", help="Use IK residual mode in low-level eval.")
+    parser.add_argument("--use-midi", action="store_true")
+
+    # DDPM options.
+    parser.add_argument("--ddpm-hl-iters", type=int, default=100)
+    parser.add_argument("--ddpm-ll-iters", type=int, default=50)
+
+    # Flow matching options.
+    parser.add_argument("--flow-steps", type=int, default=20)
+    parser.add_argument("--flow-solver", choices=["euler", "heun"], default="euler")
+    parser.add_argument("--flow-clip-mode", choices=["none", "final", "step"], default="final")
+    parser.add_argument("--flow-time-scale", type=float, default=100.0)
+    parser.add_argument("--flow-noise-scale", type=float, default=1.0)
+
+    args = parser.parse_args()
 
     song = args.song.strip()
     if not song:
@@ -317,39 +320,48 @@ def main() -> int:
         song = song[:-4]
 
     repo_dir, workspace_dir = repo_and_workspace()
-    ckpt_dir = resolve_ckpt_dir(workspace_dir, args.ckpt_dir)
-    logs_dir = workspace_dir / "logs" / "generalist_eval_single"
+    ae_ckpt = resolve_path(workspace_dir, args.ae_ckpt)
+    high_level_ckpt = resolve_path(workspace_dir, args.high_level_ckpt)
+    low_level_ckpt = resolve_path(workspace_dir, args.low_level_ckpt)
+    dataset_hl = resolve_path(workspace_dir, args.dataset_hl)
+    dataset_ll = resolve_path(workspace_dir, args.dataset_ll)
+    trajectory_dir = resolve_path(workspace_dir, args.trajectory_dir)
+    logs_dir = resolve_path(workspace_dir, args.log_dir)
 
-    print(f"[info] repo_dir      = {repo_dir}")
-    print(f"[info] workspace_dir = {workspace_dir}")
-    print(f"[info] ckpt_dir      = {ckpt_dir}")
-    print(f"[info] song          = {song}")
+    label = args.label or args.policy
 
-    check_required_paths(repo_dir, workspace_dir, ckpt_dir, song)
-    ensure_root_checkpoint_links(
-        workspace_dir,
-        ckpt_dir,
-        force=args.force_root_ckpt_links,
-    )
+    print(f"[info] repo_dir        = {repo_dir}")
+    print(f"[info] workspace_dir   = {workspace_dir}")
+    print(f"[info] policy          = {args.policy}")
+    print(f"[info] label           = {label}")
+    print(f"[info] song            = {song}")
+    print(f"[info] ae_ckpt         = {ae_ckpt}")
+    print(f"[info] high_level_ckpt = {high_level_ckpt}")
+    print(f"[info] low_level_ckpt  = {low_level_ckpt}")
 
-    if not args.no_patch:
-        patch_low_level_no_video(repo_dir)
+    check_required_paths(workspace_dir, song, ae_ckpt, high_level_ckpt, low_level_ckpt, dataset_hl, dataset_ll)
 
     if not args.keep_traj and not args.skip_high_level:
-        remove_old_trajectories(repo_dir, song)
+        remove_old_trajectories(trajectory_dir, song)
 
     env = build_env(args)
+    high_level_log = logs_dir / f"{song}_{label}_high_level.log"
+    low_level_log = logs_dir / f"{song}_{label}_low_level.log"
 
-    high_level_log = logs_dir / f"{song}_high_level.log"
-    low_level_log = logs_dir / f"{song}_low_level.log"
+    high_cmd, low_cmd = build_commands(
+        args,
+        repo_dir,
+        song,
+        ae_ckpt,
+        high_level_ckpt,
+        low_level_ckpt,
+        dataset_hl,
+        dataset_ll,
+        trajectory_dir,
+    )
 
     high_status = 0
     if not args.skip_high_level:
-        high_cmd = [
-            sys.executable,
-            "pianomime/multi_task/eval_high_level.py",
-            song,
-        ]
         high_status = run_and_log(high_cmd, workspace_dir, env, high_level_log)
         if high_status != 0:
             print(f"[error] High-level evaluation failed with exit code {high_status}")
@@ -357,16 +369,11 @@ def main() -> int:
     else:
         print("[skip] Skipping high-level evaluation and reusing existing trajectories.")
 
-    left_traj = repo_dir / "multi_task" / "trajectories" / f"{song}_left_hand_action_list.npy"
-    right_traj = repo_dir / "multi_task" / "trajectories" / f"{song}_right_hand_action_list.npy"
+    left_traj = trajectory_dir / f"{song}_left_hand_action_list.npy"
+    right_traj = trajectory_dir / f"{song}_right_hand_action_list.npy"
     require_path(left_traj, "Missing generated left-hand trajectory")
     require_path(right_traj, "Missing generated right-hand trajectory")
 
-    low_cmd = [
-        sys.executable,
-        "pianomime/multi_task/eval_low_level.py",
-        song,
-    ]
     low_status = run_and_log(low_cmd, workspace_dir, env, low_level_log)
 
     text = low_level_log.read_text(encoding="utf-8", errors="replace") if low_level_log.exists() else ""
@@ -375,6 +382,8 @@ def main() -> int:
     f1 = parse_metric(text, "F1")
 
     print("\n========== Result ==========")
+    print(f"label:     {label}")
+    print(f"policy:    {args.policy}")
     print(f"song:      {song}")
     print(f"precision: {precision}")
     print(f"recall:    {recall}")
@@ -387,15 +396,26 @@ def main() -> int:
         csv_path,
         {
             "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "label": label,
+            "policy": args.policy,
             "song": song,
             "precision": precision,
             "recall": recall,
             "f1": f1,
             "high_level_status": high_status,
             "low_level_status": low_status,
-            "ckpt_dir": str(ckpt_dir),
+            "ae_ckpt": str(ae_ckpt),
+            "high_level_ckpt": str(high_level_ckpt),
+            "low_level_ckpt": str(low_level_ckpt),
+            "dataset_hl": str(dataset_hl),
+            "dataset_ll": str(dataset_ll),
             "high_level_log": str(high_level_log),
             "low_level_log": str(low_level_log),
+            "flow_steps": args.flow_steps if args.policy == "flow" else "",
+            "flow_solver": args.flow_solver if args.policy == "flow" else "",
+            "flow_clip_mode": args.flow_clip_mode if args.policy == "flow" else "",
+            "ddpm_hl_iters": args.ddpm_hl_iters if args.policy == "ddpm" else "",
+            "ddpm_ll_iters": args.ddpm_ll_iters if args.policy == "ddpm" else "",
         },
     )
     print(f"[saved] {csv_path}")

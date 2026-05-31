@@ -1,243 +1,214 @@
+import argparse
+import collections
+import os
+import shutil
 import sys
+from pathlib import Path
+
+# Keep original import behavior, plus make direct execution from workspace robust.
 directory = 'pianomime'
 if directory not in sys.path:
     sys.path.append(directory)
-from robopianist import suite
-import dm_env_wrappers as wrappers
-import robopianist.wrappers as robopianist_wrappers
 
-from pathlib import Path
-from typing import Optional, Tuple
-import tyro
-from dataclasses import dataclass, asdict
-import time
-import collections
-
-from tqdm import tqdm
 import numpy as np
 import torch
-import os
-
-from IPython.display import HTML
-from base64 import b64encode
-
 from diffusers.schedulers.scheduling_ddpm import DDPMScheduler
-from diffusers.training_utils import EMAModel
-from diffusers.optimization import get_scheduler
+from tqdm import tqdm
 
-from network import ConditionalUnet1D, VariationalConvMlpEncoder, ConvEncoder
-from dataset import normalize_data, read_dataset, unnormalize_data
-from utils import get_diffusion_obs, Args, get_env_ll, get_flattend_obs
 import goal_auto_encoder.network
+from dataset import normalize_data, read_dataset, unnormalize_data
+from network import ConditionalUnet1D, ConvEncoder
+from utils import get_env_ll, get_flattend_obs
 
-def play_video(filename: str):
-    mp4 = open(filename, "rb").read()
-    data_url = "data:video/mp4;base64," + b64encode(mp4).decode()
 
-    return HTML(
-        """
-  <video controls>
-        <source src="%s" type="video/mp4">
-  </video>
-  """
-        % data_url
-    )
+def resolve_existing_path(candidates, what="file"):
+    for candidate in candidates:
+        if candidate and os.path.exists(candidate):
+            return candidate
+    tried = ", ".join(str(x) for x in candidates if x)
+    raise FileNotFoundError(f"Could not find {what}. Tried: {tried}")
 
-def main() -> None:
-    pred_horizon = 4
-    action_horizon = 4
-    obs_horizon = 1
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Evaluate PianoMime low-level policy with the original DDPM sampler.")
+    parser.add_argument("task_name", type=str, help="Song/task name without .pkl")
+    parser.add_argument("--dataset-path", "--dataset_path", dest="dataset_path", type=str, default="./dataset_ll.zarr")
+    parser.add_argument("--ckpt-path", "--ckpt_path", dest="ckpt_path", type=str, default=None)
+    parser.add_argument("--ae-ckpt", "--ae_ckpt", dest="ae_ckpt", type=str, default=None)
+    parser.add_argument("--trajectory-dir", "--trajectory_dir", dest="trajectory_dir", type=str, default="pianomime/multi_task/trajectories")
+    parser.add_argument("--record-dir", "--record_dir", dest="record_dir", type=str, default=None)
+    parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu")
+    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--lookahead", type=int, default=10)
+    parser.add_argument("--num-diffusion-iters", "--num_diffusion_iters", dest="num_diffusion_iters", type=int, default=50)
+    parser.add_argument("--enable-ik", "--enable_ik", dest="enable_ik", action="store_true", help="Use IK residual mode. Default follows original script: False.")
+    parser.add_argument("--use-midi", "--use_midi", dest="use_midi", action="store_true")
+    return parser.parse_args()
+
+
+def build_model(device):
     obs_dim = 404
     action_dim = 46
-    task_name = sys.argv[1]
-    n_songs = 1
 
-    hl_model_num_songs = None
-    ll_model_num_songs = None
-    use_gt = False
+    def create_midi_encoder(device=device):
+        return ConvEncoder(
+            in_channels=52,
+            mid_channels=64,
+            out_channels=128,
+            horizon=4,
+            noise_fingering=0,
+            noise_ft=0,
+        ).to(device)
 
-    precisions = []
-    recalls = []
-    f1s = []
-
-    # dataset_path = "pianomime/dataset_ll.zarr"
-    dataset_path = "./dataset_ll.zarr"
-
-    dataloader, stats = read_dataset(pred_horizon=pred_horizon,
-                            obs_horizon=obs_horizon,
-                            action_horizon=action_horizon,
-                            dataset_path=dataset_path,
-                            normalization=True)
-    # ckpt_path = "diffusion/ckpts/checkpoint_dataset_h3.ckpt"
-
-    device = torch.device('cuda')
-
-    # SDF
-    ae = goal_auto_encoder.network.Autoencoder(
-        latent_dim=16,
-        cond_dim=64,
-        ).to('cuda')
-
-    # ckpt_path = "checkpoint_ae.ckpt"
-    ckpt_path = "./reproduced_ckpt/checkpoint_ae.ckpt"
-    state_dict = torch.load(ckpt_path, map_location='cuda')
-    ae.load_state_dict(state_dict)
-    encoder = ae.encoder
-
-    # # create diffusion network object
-    def create_midi_encoder(device='cuda'):
-        midi_encoder = ConvEncoder(
-                        in_channels=52,
-                        mid_channels=64,
-                        out_channels=128,
-                        horizon=4,
-                        noise_fingering=0,
-                        noise_ft=0,
-                    ).to(device)
-        return midi_encoder
-    noise_pred_net = ConditionalUnet1D(
+    return ConditionalUnet1D(
         input_dim=action_dim,
-        global_cond_dim=obs_dim*obs_horizon,
+        global_cond_dim=obs_dim,
         midi_dim=208,
         midi_cond_dim=0,
         midi_encoder=create_midi_encoder,
         freeze_encoder=False,
     ).to(device)
 
-    # ckpt_path = "checkpoint_low_level.ckpt"
-    ckpt_path = "./reproduced_ckpt/dataset_ll.ckpt"
 
-    state_dict = torch.load(ckpt_path, map_location='cuda')
-    ema_noise_pred_net = noise_pred_net
-    ema_noise_pred_net.load_state_dict(state_dict)
+def ensure_utils_can_find_trajectories(task_name, trajectory_dir):
+    # utils.get_env_ll loads hard-coded pianomime/multi_task/trajectories/*.npy.
+    source_dir = Path(trajectory_dir)
+    target_dir = Path("pianomime/multi_task/trajectories")
+    names = [
+        f"{task_name}_left_hand_action_list.npy",
+        f"{task_name}_right_hand_action_list.npy",
+    ]
+    for name in names:
+        src = source_dir / name
+        if not src.exists():
+            raise FileNotFoundError(f"Missing high-level trajectory {src}. Run eval_high_level.py first.")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    if source_dir.resolve() != target_dir.resolve():
+        for name in names:
+            shutil.copy2(source_dir / name, target_dir / name)
+    return target_dir
 
-    for i in range(1):
-        left_hand_action_list = np.load('pianomime/multi_task/trajectories/{}_left_hand_action_list.npy'.format(task_name))
-        max_steps = left_hand_action_list.shape[0]
-        # enable_ik=True: -res,  enable_ik=False, oridinary two-stage diff
-        env = get_env_ll(task_name=task_name, enable_ik=False, lookahead = 10,
-                        record_dir=None, use_fingering_emb=False,
-                        use_midi=False)
 
-        timestep = env.reset()
-        lh_current, rh_current = env.get_fingertip_pos()
+@torch.no_grad()
+def main():
+    args = parse_args()
+    torch.manual_seed(args.seed)
+    np.random.seed(args.seed)
 
-        step_idx = 0
-        current_fingertip = np.concatenate((lh_current, rh_current), axis=0).flatten()
-        obs = get_flattend_obs(timestep,
-                                lookahead=3,
-                                exclude_keys=['fingering', 'prior_action'],
-                                encoder=encoder, sampling=False,
-                                concatenate_keys=['goal', 'demo']
-                                )
+    pred_horizon = 4
+    action_horizon = 4
+    obs_horizon = 1
+    action_dim = 46
+    batch_size = 1
 
-        obs_deque = collections.deque(
-            [obs] * obs_horizon, maxlen=obs_horizon)
+    device = torch.device(args.device if torch.cuda.is_available() or args.device == "cpu" else "cpu")
 
-        num_diffusion_iters = 50
-        noise_scheduler = DDPMScheduler(
-            num_train_timesteps=num_diffusion_iters,
-            # the choise of beta schedule has big impact on performance
-            # we found squared cosine works the best
-            beta_schedule='squaredcos_cap_v2',
-            # clip output to [-1,1] to improve stability
-            clip_sample=True,
-            # our network predicts noise (instead of denoised action)
-            prediction_type='epsilon'
-        )
+    _dataloader, stats = read_dataset(
+        pred_horizon=pred_horizon,
+        obs_horizon=obs_horizon,
+        action_horizon=action_horizon,
+        dataset_path=args.dataset_path,
+        normalization=True,
+    )
 
-        with tqdm(total=max_steps, desc="Eval Env") as pbar:
-            while not timestep.last():
-                B = 1
-                # stack the last obs_horizon number of observations
-                nobs = np.stack(obs_deque)
-                # normalize observation
-                nobs = normalize_data(nobs, stats['obs'])
-                # device transfer
-                nobs = torch.from_numpy(nobs).to(device, dtype=torch.float32)
+    ae = goal_auto_encoder.network.Autoencoder(latent_dim=16, cond_dim=64).to(device)
+    ae_ckpt = resolve_existing_path(
+        [args.ae_ckpt, "./reproduced_ckpt/checkpoint_ae.ckpt", "./checkpoint_ae.ckpt", "checkpoint_ae.ckpt"],
+        what="goal auto-encoder checkpoint",
+    )
+    ae.load_state_dict(torch.load(ae_ckpt, map_location=device))
+    ae.eval()
+    encoder = ae.encoder
+    print(f"[DDPM-LL eval] loaded goal AE: {ae_ckpt}")
 
-                # infer action
-                with torch.no_grad():
-                    # reshape observation to (B,obs_horizon*obs_dim)
-                    obs_cond = nobs.unsqueeze(0).flatten(start_dim=1)
+    noise_pred_net = build_model(device)
+    ckpt_path = resolve_existing_path(
+        [args.ckpt_path, "./reproduced_ckpt/dataset_ll.ckpt", "./checkpoint_low_level.ckpt", "checkpoint_low_level.ckpt"],
+        what="low-level DDPM checkpoint",
+    )
+    noise_pred_net.load_state_dict(torch.load(ckpt_path, map_location=device))
+    noise_pred_net.eval()
+    print(f"[DDPM-LL eval] loaded checkpoint: {ckpt_path}")
 
-                    # initialize action from Guassian noise
-                    noisy_action = torch.randn(
-                        (B, pred_horizon, action_dim), device=device)
-                    naction = noisy_action
+    trajectory_dir = ensure_utils_can_find_trajectories(args.task_name, args.trajectory_dir)
+    left_hand_action_list = np.load(trajectory_dir / f"{args.task_name}_left_hand_action_list.npy")
+    max_steps = left_hand_action_list.shape[0]
 
-                    # init scheduler
-                    noise_scheduler.set_timesteps(num_diffusion_iters)
+    env = get_env_ll(
+        task_name=args.task_name,
+        enable_ik=args.enable_ik,
+        lookahead=args.lookahead,
+        record_dir=Path(args.record_dir) if args.record_dir else None,
+        use_fingering_emb=False,
+        use_midi=args.use_midi,
+    )
 
-                    for k in noise_scheduler.timesteps:
-                        # predict noise
-                        noise_pred = ema_noise_pred_net(
-                            sample=naction,
-                            timestep=k,
-                            global_cond=obs_cond
-                        )
+    timestep = env.reset()
+    obs = get_flattend_obs(
+        timestep,
+        lookahead=3,
+        exclude_keys=["fingering", "prior_action"],
+        encoder=encoder,
+        sampling=False,
+        concatenate_keys=["goal", "demo"],
+    )
+    obs_deque = collections.deque([obs] * obs_horizon, maxlen=obs_horizon)
 
-                        # inverse diffusion step (remove noise)
-                        naction = noise_scheduler.step(
-                            model_output=noise_pred,
-                            timestep=k,
-                            sample=naction
-                        ).prev_sample
+    noise_scheduler = DDPMScheduler(
+        num_train_timesteps=args.num_diffusion_iters,
+        beta_schedule="squaredcos_cap_v2",
+        clip_sample=True,
+        prediction_type="epsilon",
+    )
 
-                # unnormalize action
-                naction = naction.detach().to('cpu').numpy()
+    step_idx = 0
+    with tqdm(total=max_steps, desc="DDPM-LL Eval Env") as pbar:
+        while not timestep.last():
+            nobs = np.stack(obs_deque)
+            nobs = normalize_data(nobs, stats["obs"])
+            nobs = torch.from_numpy(nobs).to(device=device, dtype=torch.float32)
 
-                naction = naction[0]
-                action_pred = naction # Unnormalize
+            obs_cond = nobs.unsqueeze(0).flatten(start_dim=1)
+            noisy_action = torch.randn((batch_size, pred_horizon, action_dim), device=device)
+            naction = noisy_action
+            noise_scheduler.set_timesteps(args.num_diffusion_iters)
+            for k in noise_scheduler.timesteps:
+                noise_pred = noise_pred_net(sample=naction, timestep=k, global_cond=obs_cond)
+                naction = noise_scheduler.step(model_output=noise_pred, timestep=k, sample=naction).prev_sample
 
-                # only take action_horizon number of actions
-                start = obs_horizon - 1
-                end = start + action_horizon
-                action = action_pred[start:end,:]
-                # (action_horizon, action_dim)
+            action_pred = naction.detach().cpu().numpy()[0]
+            start = obs_horizon - 1
+            end = start + action_horizon
+            action = action_pred[start:end, :]
 
-                # execute action_horizon number of steps
-                # without replanning
-                for i in range(len(action)):
-                    # stepping env
-                    action[i] = unnormalize_data(action[i], stats=stats["action"])
-                    demo = timestep.observation['demo']
-                    demo_lh, demo_rh = np.split(demo, 2)
-                    demo_lh = demo_lh[:18]
-                    demo_rh = demo_rh[:18]
-                    demo = np.concatenate((demo_lh, demo_rh), axis=0).flatten()
+            for i in range(len(action)):
+                action_i = unnormalize_data(action[i], stats=stats["action"])
+                timestep = env.step(np.append(action_i, 0))
+                if timestep.last():
+                    break
 
-                    timestep = env.step(np.append(action[i], 0))
-                    if timestep.last():
-                        break
-                    # save observations
-                    lh_current, rh_current = env.get_fingertip_pos()
-                    current_fingertip = np.concatenate((lh_current, rh_current), axis=0).flatten()
-                    step_idx += 1
-                    if step_idx < left_hand_action_list.shape[0]:
-                        # hl_command = traj[step_idx].flatten()
-                        obs = get_flattend_obs(timestep,
-                            lookahead=3,
-                            exclude_keys=['fingering', 'prior_action'],
-                            encoder=encoder, sampling=False,
-                            concatenate_keys=['goal', 'demo']
-                            )
-                    obs_deque.append(obs)
-                    # update progress bar
-                    pbar.update(1)
-        print(task_name)
-        metric = env.get_musical_metrics()
-        precision = metric['precision']
-        recall = metric['recall']
-        f1 = metric['f1']
-        precisions.append(precision)
-        recalls.append(recall)
-        f1s.append(f1)
+                step_idx += 1
+                if step_idx < left_hand_action_list.shape[0]:
+                    obs = get_flattend_obs(
+                        timestep,
+                        lookahead=3,
+                        exclude_keys=["fingering", "prior_action"],
+                        encoder=encoder,
+                        sampling=False,
+                        concatenate_keys=["goal", "demo"],
+                    )
+                obs_deque.append(obs)
+                pbar.update(1)
 
-    print("Precision: {}".format(precision))
-    print("Recall: {}".format(recall))
-    print("F1: {}".format(f1))
+    metric = env.get_musical_metrics()
+    precision = metric["precision"]
+    recall = metric["recall"]
+    f1 = metric["f1"]
+    print(args.task_name)
+    print(f"Precision: {precision}")
+    print(f"Recall: {recall}")
+    print(f"F1: {f1}")
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()
