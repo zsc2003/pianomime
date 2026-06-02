@@ -2,5 +2,8 @@ __pycache__/
 dataset*
 robopianist_rl/
 third_party/
+ckpts/
 *.pyc
 *.npy
+.vscode/
+*.pdf
