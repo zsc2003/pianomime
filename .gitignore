@@ -7,3 +7,4 @@ ckpts/
 *.npy
 .vscode/
 *.pdf
+*.lock
