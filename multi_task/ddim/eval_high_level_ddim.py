@@ -7,9 +7,16 @@ import torch
 from diffusers.schedulers.scheduling_ddim import DDIMScheduler
 from tqdm.auto import tqdm
 
-directory = "pianomime"
-if directory not in sys.path:
-    sys.path.append(directory)
+# Robust imports when running directly as:
+#   python pianomime/multi_task/flow_matching/eval_high_level_flow.py SONG
+_THIS_FILE = Path(__file__).resolve()
+_FLOW_DIR = _THIS_FILE.parent
+_MULTI_TASK_DIR = _FLOW_DIR.parent
+_REPO_DIR = _MULTI_TASK_DIR.parent
+_WORKSPACE_DIR = _REPO_DIR.parent
+for _p in (str(_FLOW_DIR), str(_MULTI_TASK_DIR), str(_REPO_DIR), str(_WORKSPACE_DIR)):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 from dataset import normalize_data, read_dataset, unnormalize_data
 from network import ConditionalUnet1D, VariationalConvMlpEncoder
