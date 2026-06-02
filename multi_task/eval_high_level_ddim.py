@@ -1,5 +1,4 @@
 import argparse
-import os
 import sys
 from pathlib import Path
 
@@ -24,10 +23,18 @@ def _resolve_path(path: str) -> str:
     if candidate.exists():
         return str(candidate)
     if path.startswith("pianomime/") or path.startswith("pianomime\\"):
-        fallback = Path(path.split("/", 1)[-1])
+        fallback = Path(path.replace("\\", "/").split("/", 1)[-1])
         if fallback.exists():
             return str(fallback)
     return path
+
+
+def resolve_existing_path(candidates, what="file"):
+    for candidate in candidates:
+        if candidate and Path(_resolve_path(candidate)).exists():
+            return _resolve_path(candidate)
+    tried = ", ".join(str(x) for x in candidates if x)
+    raise FileNotFoundError(f"Could not find {what}. Tried: {tried}")
 
 
 def parse_args():
@@ -37,10 +44,14 @@ def parse_args():
     parser.add_argument("task_name", help="Song/clip name, same as eval_high_level.py.")
 
     # Core paths. Defaults mirror the original DDPM script.
-    parser.add_argument("--dataset-path", default="pianomime/dataset_hl.zarr")
-    parser.add_argument("--ae-ckpt", default="checkpoint_ae.ckpt")
-    parser.add_argument("--high-level-ckpt", default="checkpoint_high_level.ckpt")
-    parser.add_argument("--output-dir", default="pianomime/multi_task/trajectories")
+    parser.add_argument("--dataset-path", "--dataset_path", dest="dataset_path",
+                        default="pianomime/dataset_hl.zarr")
+    parser.add_argument("--ae-ckpt", "--ae_ckpt", dest="ae_ckpt", default=None)
+    parser.add_argument("--ckpt-path", "--ckpt_path", "--high-level-ckpt",
+                        dest="ckpt_path", default=None)
+    parser.add_argument("--output-dir", "--trajectory-dir", "--trajectory_dir",
+                        dest="output_dir", default="pianomime/multi_task/trajectories")
+    parser.add_argument("--record-dir", "--record_dir", dest="record_dir", default=None)
 
     # DDIM hyperparameters. These are the main knobs to tune.
     parser.add_argument("--train-timesteps", type=int, default=100)
@@ -55,6 +66,8 @@ def parse_args():
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--lookahead", type=int, default=10)
+    parser.add_argument("--use-midi", "--use_midi", dest="use_midi",
+                        action="store_true")
     return parser.parse_args()
 
 
@@ -90,7 +103,17 @@ def main():
         pred_horizon=pred_horizon,
         obs_horizon=obs_horizon,
         action_horizon=action_horizon,
-        dataset_path=_resolve_path(args.dataset_path),
+        dataset_path=resolve_existing_path(
+            [
+                args.dataset_path,
+                "./dataset_hl.zarr",
+                "dataset_hl.zarr",
+                "./dataset/dataset_hl.zarr",
+                "dataset/dataset_hl.zarr",
+                "pianomime/dataset_hl.zarr",
+            ],
+            what="high-level zarr dataset",
+        ),
         normalization=True,
     )
 
@@ -98,8 +121,20 @@ def main():
         latent_dim=16,
         cond_dim=64,
     ).to(device)
-    ae.load_state_dict(torch.load(_resolve_path(args.ae_ckpt), map_location=device))
+    ae_ckpt = resolve_existing_path(
+        [
+            args.ae_ckpt,
+            "./reproduced_ckpt/checkpoint_ae.ckpt",
+            "./ckpts/checkpoint_ae.ckpt",
+            "./checkpoint_ae.ckpt",
+            "checkpoint_ae.ckpt",
+        ],
+        what="goal auto-encoder checkpoint",
+    )
+    ae.load_state_dict(torch.load(ae_ckpt, map_location=device))
+    ae.eval()
     encoder = ae.encoder
+    print(f"[DDIM-HL eval] loaded goal AE: {ae_ckpt}")
 
     noise_pred_net = ConditionalUnet1D(
         input_dim=action_dim,
@@ -108,10 +143,19 @@ def main():
         midi_cond_dim=36,
         midi_encoder=lambda: create_midi_encoder(device=args.device),
     ).to(device)
-    noise_pred_net.load_state_dict(
-        torch.load(_resolve_path(args.high_level_ckpt), map_location=device)
+    ckpt_path = resolve_existing_path(
+        [
+            args.ckpt_path,
+            "./reproduced_ckpt/dataset_hl_without_fingering.ckpt",
+            "./ckpts/checkpoint_high_level.ckpt",
+            "./checkpoint_high_level.ckpt",
+            "checkpoint_high_level.ckpt",
+        ],
+        what="high-level diffusion checkpoint",
     )
+    noise_pred_net.load_state_dict(torch.load(ckpt_path, map_location=device))
     noise_pred_net.eval()
+    print(f"[DDIM-HL eval] loaded checkpoint: {ckpt_path}")
 
     noise_scheduler = DDIMScheduler(
         num_train_timesteps=args.train_timesteps,
@@ -120,7 +164,12 @@ def main():
         prediction_type="epsilon",
     )
 
-    env, max_steps = get_env_hl(args.task_name, lookahead=args.lookahead)
+    env, max_steps = get_env_hl(
+        args.task_name,
+        record_dir=Path(args.record_dir) if args.record_dir else None,
+        lookahead=args.lookahead,
+        use_midi=args.use_midi,
+    )
     trajectory_lh = np.zeros((max_steps, 3, 6))
     trajectory_rh = np.zeros((max_steps, 3, 6))
     trajectory = []
@@ -188,7 +237,6 @@ def main():
             naction = unnormalize_data(naction, stats["action"])
             naction = naction.reshape(1, pred_horizon, -1)
 
-            action = naction[0][0]
             nft = naction[0, :, :36]
             goal88 = timestep.observation["goal"][:88]
             keys = np.nonzero(goal88)
@@ -207,19 +255,22 @@ def main():
             last_rh_ft = rh_ft
             last_keys = keys
             last_fingering = fingering
-            last_fingertip_pos = np.concatenate((lh_ft.T.flatten(), rh_ft.T.flatten()))
+            ft = np.concatenate((lh_ft.T.flatten(), rh_ft.T.flatten()))
+            last_fingertip_pos = ft
 
             trajectory_lh[step] = lh_ft
             trajectory_rh[step] = rh_ft
+            trajectory.append(ft.copy())
             step += 1
             timestep = env.step(np.zeros(47))
             pbar.update(1)
 
-    output_dir = Path(_resolve_path(args.output_dir))
+    output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    np.save(output_dir / f"{args.task_name}_trajectory.npy", trajectory)
+    np.save(output_dir / f"{args.task_name}_trajectory.npy", np.array(trajectory, dtype=np.float32))
     np.save(output_dir / f"{args.task_name}_left_hand_action_list.npy", trajectory_lh)
     np.save(output_dir / f"{args.task_name}_right_hand_action_list.npy", trajectory_rh)
+    print(f"[DDIM-HL eval] saved trajectories to {output_dir}")
 
 
 if __name__ == "__main__":

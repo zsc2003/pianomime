@@ -1,5 +1,6 @@
 import argparse
 import collections
+import shutil
 import sys
 from pathlib import Path
 
@@ -24,10 +25,39 @@ def _resolve_path(path: str) -> str:
     if candidate.exists():
         return str(candidate)
     if path.startswith("pianomime/") or path.startswith("pianomime\\"):
-        fallback = Path(path.split("/", 1)[-1])
+        fallback = Path(path.replace("\\", "/").split("/", 1)[-1])
         if fallback.exists():
             return str(fallback)
     return path
+
+
+def resolve_existing_path(candidates, what="file"):
+    for candidate in candidates:
+        if candidate and Path(_resolve_path(candidate)).exists():
+            return _resolve_path(candidate)
+    tried = ", ".join(str(x) for x in candidates if x)
+    raise FileNotFoundError(f"Could not find {what}. Tried: {tried}")
+
+
+def ensure_utils_can_find_trajectories(task_name, trajectory_dir):
+    # utils.get_env_ll loads hard-coded pianomime/multi_task/trajectories/*.npy.
+    source_dir = Path(trajectory_dir)
+    target_dir = Path("pianomime/multi_task/trajectories")
+    names = [
+        f"{task_name}_left_hand_action_list.npy",
+        f"{task_name}_right_hand_action_list.npy",
+    ]
+    for name in names:
+        src = source_dir / name
+        if not src.exists():
+            raise FileNotFoundError(
+                f"Missing high-level trajectory {src}. Run eval_high_level_ddim.py first."
+            )
+    target_dir.mkdir(parents=True, exist_ok=True)
+    if source_dir.resolve() != target_dir.resolve():
+        for name in names:
+            shutil.copy2(source_dir / name, target_dir / name)
+    return target_dir
 
 
 def parse_args():
@@ -37,15 +67,18 @@ def parse_args():
     parser.add_argument("task_name", help="Song/clip name, same as eval_low_level.py.")
 
     # Core paths. Defaults mirror the original DDPM script.
-    parser.add_argument("--dataset-path", default="pianomime/dataset_ll.zarr")
-    parser.add_argument("--ae-ckpt", default="checkpoint_ae.ckpt")
-    parser.add_argument("--low-level-ckpt", default="checkpoint_low_level.ckpt")
+    parser.add_argument("--dataset-path", "--dataset_path", dest="dataset_path",
+                        default="pianomime/dataset_ll.zarr")
+    parser.add_argument("--ae-ckpt", "--ae_ckpt", dest="ae_ckpt", default=None)
+    parser.add_argument("--ckpt-path", "--ckpt_path", "--low-level-ckpt",
+                        dest="ckpt_path", default=None)
     parser.add_argument(
         "--trajectory-dir",
         default="pianomime/multi_task/trajectories",
         help="High-level trajectory directory produced by eval_high_level*.py.",
     )
-    parser.add_argument("--record-dir", default=".")
+    parser.add_argument("--record-dir", "--record_dir", dest="record_dir",
+                        default=None)
 
     # DDIM hyperparameters. These are the main knobs to tune.
     parser.add_argument("--train-timesteps", type=int, default=100)
@@ -59,7 +92,8 @@ def parse_args():
     # Runtime controls.
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--env-lookahead", type=int, default=10)
+    parser.add_argument("--lookahead", "--env-lookahead", dest="env_lookahead",
+                        type=int, default=10)
     parser.add_argument("--obs-lookahead", type=int, default=3)
     parser.add_argument("--enable-ik", action=argparse.BooleanOptionalAction,
                         default=False)
@@ -99,7 +133,17 @@ def main():
         pred_horizon=pred_horizon,
         obs_horizon=obs_horizon,
         action_horizon=action_horizon,
-        dataset_path=_resolve_path(args.dataset_path),
+        dataset_path=resolve_existing_path(
+            [
+                args.dataset_path,
+                "./dataset_ll.zarr",
+                "dataset_ll.zarr",
+                "./dataset/dataset_ll.zarr",
+                "dataset/dataset_ll.zarr",
+                "pianomime/dataset_ll.zarr",
+            ],
+            what="low-level zarr dataset",
+        ),
         normalization=True,
     )
 
@@ -107,8 +151,20 @@ def main():
         latent_dim=16,
         cond_dim=64,
     ).to(device)
-    ae.load_state_dict(torch.load(_resolve_path(args.ae_ckpt), map_location=device))
+    ae_ckpt = resolve_existing_path(
+        [
+            args.ae_ckpt,
+            "./reproduced_ckpt/checkpoint_ae.ckpt",
+            "./ckpts/checkpoint_ae.ckpt",
+            "./checkpoint_ae.ckpt",
+            "checkpoint_ae.ckpt",
+        ],
+        what="goal auto-encoder checkpoint",
+    )
+    ae.load_state_dict(torch.load(ae_ckpt, map_location=device))
+    ae.eval()
     encoder = ae.encoder
+    print(f"[DDIM-LL eval] loaded goal AE: {ae_ckpt}")
 
     noise_pred_net = ConditionalUnet1D(
         input_dim=action_dim,
@@ -118,10 +174,19 @@ def main():
         midi_encoder=lambda: create_midi_encoder(device=args.device),
         freeze_encoder=False,
     ).to(device)
-    noise_pred_net.load_state_dict(
-        torch.load(_resolve_path(args.low_level_ckpt), map_location=device)
+    ckpt_path = resolve_existing_path(
+        [
+            args.ckpt_path,
+            "./reproduced_ckpt/dataset_ll.ckpt",
+            "./ckpts/checkpoint_low_level.ckpt",
+            "./checkpoint_low_level.ckpt",
+            "checkpoint_low_level.ckpt",
+        ],
+        what="low-level diffusion checkpoint",
     )
+    noise_pred_net.load_state_dict(torch.load(ckpt_path, map_location=device))
     noise_pred_net.eval()
+    print(f"[DDIM-LL eval] loaded checkpoint: {ckpt_path}")
 
     noise_scheduler = DDIMScheduler(
         num_train_timesteps=args.train_timesteps,
@@ -130,7 +195,7 @@ def main():
         prediction_type="epsilon",
     )
 
-    trajectory_dir = Path(_resolve_path(args.trajectory_dir))
+    trajectory_dir = ensure_utils_can_find_trajectories(args.task_name, args.trajectory_dir)
     left_hand_action_list = np.load(
         trajectory_dir / f"{args.task_name}_left_hand_action_list.npy"
     )
@@ -140,7 +205,7 @@ def main():
         task_name=args.task_name,
         enable_ik=args.enable_ik,
         lookahead=args.env_lookahead,
-        record_dir=args.record_dir,
+        record_dir=Path(args.record_dir) if args.record_dir else None,
         use_fingering_emb=False,
         use_midi=args.use_midi,
     )
@@ -191,8 +256,8 @@ def main():
             action = action_pred[start:end, :]
 
             for i in range(len(action)):
-                action[i] = unnormalize_data(action[i], stats=stats["action"])
-                timestep = env.step(np.append(action[i], 0))
+                action_i = unnormalize_data(action[i], stats=stats["action"])
+                timestep = env.step(np.append(action_i, 0))
                 if timestep.last():
                     break
 
