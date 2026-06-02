@@ -72,6 +72,7 @@ def check_required_paths(
     low_level_ckpt: Path,
     dataset_hl: Path,
     dataset_ll: Path,
+    use_midi: bool = False,
 ) -> None:
     require_path(ae_ckpt, "Missing AE checkpoint")
     require_path(high_level_ckpt, "Missing high-level checkpoint")
@@ -81,17 +82,23 @@ def check_required_paths(
 
     notes_train = workspace_dir / "dataset" / "notes" / f"{song}.pkl"
     notes_test = workspace_dir / "dataset" / "notes_test" / f"{song}.pkl"
-    if not notes_train.exists() and not notes_test.exists():
-        raise FileNotFoundError(
-            "Cannot find note trajectory for this song. Expected one of:\n"
-            f"  {notes_train}\n"
-            f"  {notes_test}"
-        )
-    if notes_train.exists() and notes_test.exists():
-        print(
-            f"[warn] {song}.pkl exists in both dataset/notes and dataset/notes_test. "
-            "The environment loader usually tries dataset/notes first."
-        )
+
+    if use_midi:
+        midi_list = ["TwinkleTwinkleLittleStar", "CMajorScaleOneHand", "CMajorScaleTwoHands", "DMajorScaleOneHand", "DMajorScaleTwoHands", "CMajorChordProgressionTwoHands", "TwinkleTwinkleRousseau", "NocturneRousseau"]
+        if song not in midi_list:
+            raise FileNotFoundError(f"Cannot find this song {song} in midi")
+    else:
+        if not notes_train.exists() and not notes_test.exists():
+            raise FileNotFoundError(
+                "Cannot find note trajectory for this song. Expected one of:\n"
+                f"  {notes_train}\n"
+                f"  {notes_test}"
+            )
+        if notes_train.exists() and notes_test.exists():
+            print(
+                f"[warn] {song}.pkl exists in both dataset/notes and dataset/notes_test. "
+                "The environment loader usually tries dataset/notes first."
+            )
 
 
 def remove_old_trajectories(trajectory_dir: Path, song: str) -> None:
@@ -327,6 +334,7 @@ def main() -> int:
     dataset_ll = resolve_path(workspace_dir, args.dataset_ll)
     trajectory_dir = resolve_path(workspace_dir, args.trajectory_dir)
     logs_dir = resolve_path(workspace_dir, args.log_dir)
+    use_midi = args.use_midi
 
     label = args.label or args.policy
 
@@ -339,7 +347,7 @@ def main() -> int:
     print(f"[info] high_level_ckpt = {high_level_ckpt}")
     print(f"[info] low_level_ckpt  = {low_level_ckpt}")
 
-    check_required_paths(workspace_dir, song, ae_ckpt, high_level_ckpt, low_level_ckpt, dataset_hl, dataset_ll)
+    check_required_paths(workspace_dir, song, ae_ckpt, high_level_ckpt, low_level_ckpt, dataset_hl, dataset_ll, use_midi)
 
     if not args.keep_traj and not args.skip_high_level:
         remove_old_trajectories(trajectory_dir, song)

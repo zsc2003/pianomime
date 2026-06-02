@@ -162,6 +162,68 @@ class Args:
     camera_id: Optional[str | int] = "piano/back"
     action_reward_observation: bool = False
 
+
+def _load_note_trajectory(task_name: str):
+    """Load PianoMime preprocessed NoteTrajectory from dataset/notes or dataset/notes_test."""
+    candidates = [
+        Path("dataset") / "notes" / f"{task_name}.pkl",
+        Path("dataset") / "notes_test" / f"{task_name}.pkl",
+    ]
+    for path in candidates:
+        if path.exists():
+            with path.open("rb") as f:
+                return pickle.load(f)
+
+    searched = ", ".join(str(p) for p in candidates)
+    raise FileNotFoundError(
+        f"Cannot find NoteTrajectory for task '{task_name}'. Searched: {searched}. "
+        "For PianoMime downloaded dataset songs, use use_midi=False. "
+        "use_midi=True only works for RoboPianist built-in MIDI names or valid MIDI file paths."
+    )
+
+
+def _generated_trajectory_paths(task_name: str):
+    base = Path("pianomime") / "multi_task" / "trajectories"
+    return (
+        base / f"{task_name}_left_hand_action_list.npy",
+        base / f"{task_name}_right_hand_action_list.npy",
+    )
+
+
+def _load_generated_trajectories(task_name: str):
+    """Load high-level generated trajectories if both files exist."""
+    lh_path, rh_path = _generated_trajectory_paths(task_name)
+    if lh_path.exists() and rh_path.exists():
+        return np.load(lh_path), np.load(rh_path)
+    return None, None
+
+
+def _empty_demo(length: int, dtype=np.float64):
+    """Placeholder trajectory with shape expected by wrappers: (T, 3, 6)."""
+    return np.zeros((int(length), 3, 6), dtype=dtype)
+
+
+def _match_demo_length(demo: np.ndarray, target_length: int, name: str) -> np.ndarray:
+    """Make demo length exactly match len(task._notes), because wrappers assert equality."""
+    target_length = int(target_length)
+
+    if demo.shape[0] == target_length:
+        return demo
+
+    if demo.shape[0] > target_length:
+        print(f"[warn] {name} length {demo.shape[0]} > task length {target_length}; trimming.")
+        return demo[:target_length]
+
+    print(f"[warn] {name} length {demo.shape[0]} < task length {target_length}; padding with last frame.")
+    if demo.shape[0] == 0:
+        return _empty_demo(target_length, dtype=demo.dtype)
+
+    pad = np.repeat(demo[-1:], target_length - demo.shape[0], axis=0)
+    return np.concatenate([demo, pad], axis=0)
+
+
+
+
 def get_diffusion_obs_1(timestep, exclude_keys=[]):
     ret = {}
     if 'fingering' not in exclude_keys:
@@ -356,23 +418,19 @@ def get_env_test(task_name, enable_ik = True, record_dir=None, lookahead = 3,
     return env.env
 
 
-def get_env_hl(task_name, record_dir=None, lookahead = 3, use_fingering_emb=False,
-                use_midi=False):
+def get_env_hl(task_name, record_dir=None, lookahead=3, use_fingering_emb=False, use_midi=False):
     # start_from = start_from_dict.START_FROM[task_name]
-    if not use_midi:
-        try:
-            with open('dataset/notes/{}.pkl'.format(task_name), 'rb') as f:
-                note_traj = pickle.load(f)
-        except:
-            with open('dataset/notes_test/{}.pkl'.format(task_name), 'rb') as f:
-                note_traj = pickle.load(f)
-        notes = note_traj.notes
-        length = len(notes)
-        trim = False if length >=600 or length < 500 else True
+
+    # use_midi=False:
+    #   use PianoMime preprocessed dataset/notes/<song>.pkl
+
+    # use_midi=True:
+    #   use robopianist.music.load(task_name)
+    #   task_name must be a RoboPianist built-in MIDI name or a valid MIDI path.
+
+
     if use_midi:
         task = piano_with_shadow_hands_res.PianoWithShadowHandsResidual(
-            # hand_side=HandSide.LEFT,
-            # note_trajectory=note_traj,
             midi=music.load(task_name),
             change_color_on_activation=True,
             trim_silence=True,
@@ -389,10 +447,12 @@ def get_env_hl(task_name, record_dir=None, lookahead = 3, use_fingering_emb=Fals
             fingering_lookahead=use_fingering_emb,
         )
     else:
+        note_traj = _load_note_trajectory(task_name)
+        length_hint = len(note_traj.notes)
+        trim = False if length_hint >= 600 or length_hint < 500 else True
+
         task = piano_with_shadow_hands_res.PianoWithShadowHandsResidual(
-            # hand_side=HandSide.LEFT,
             note_trajectory=note_traj,
-            # midi=music.load(task_name),
             change_color_on_activation=True,
             trim_silence=trim,
             control_timestep=0.05,
@@ -408,9 +468,15 @@ def get_env_hl(task_name, record_dir=None, lookahead = 3, use_fingering_emb=Fals
             fingering_lookahead=use_fingering_emb,
         )
 
+    # fix bug: use_midi or not, both get the true episode length from task
+    length = len(task._notes)
+
     env = composer_utils.Environment(
-        recompile_physics=False, task=task, strip_singleton_obs_buffer_dim=True
+        recompile_physics=False,
+        task=task,
+        strip_singleton_obs_buffer_dim=True,
     )
+
     if record_dir is not None:
         env = PianoSoundVideoWrapper(
             env,
@@ -418,35 +484,24 @@ def get_env_hl(task_name, record_dir=None, lookahead = 3, use_fingering_emb=Fals
             camera_id="piano/back",
             record_dir=record_dir,
         )
-    env = MidiEvaluationWrapper(
-        environment=env, deque_size=1
-    )
-    env = CanonicalSpecWrapper(env, clip=True)
 
+    env = MidiEvaluationWrapper(
+        environment=env,
+        deque_size=1,
+    )
+
+    env = CanonicalSpecWrapper(env, clip=True)
     env = SinglePrecisionWrapper(env)
     env = DmControlWrapper(env)
-
     env = Dm2GymWrapper(env)
 
     return env.env, length
 
-def get_env_ll(task_name, enable_ik = True, record_dir=None, lookahead = 3, external_demo=False, use_fingering_emb=False,
-            external_fingering=None, use_midi=False):
-    # start_from = start_from_dict.START_FROM[task_name]
-    if not use_midi:
-        try:
-            with open('dataset/notes/{}.pkl'.format(task_name), 'rb') as f:
-                note_traj = pickle.load(f)
-        except:
-            with open('dataset/notes_test/{}.pkl'.format(task_name), 'rb') as f:
-                note_traj = pickle.load(f)
 
-    # Load hand action trajectory
-    left_hand_action_list = np.load('pianomime/multi_task/trajectories/{}_left_hand_action_list.npy'.format(task_name))
-    right_hand_action_list = np.load('pianomime/multi_task/trajectories/{}_right_hand_action_list.npy'.format(task_name))
 
-    length = left_hand_action_list.shape[0]
-    trim = False if length >=600 or length < 500 else True
+def get_env_ll(task_name, enable_ik=True, record_dir=None, lookahead=3, external_demo=False, use_fingering_emb=False, external_fingering=None, use_midi=False):
+    # Normal two-stage evaluation expects these files to be generated by eval_high_level.py.
+    left_hand_action_list, right_hand_action_list = _load_generated_trajectories(task_name)
 
     if use_midi:
         task = piano_with_shadow_hands_res.PianoWithShadowHandsResidual(
@@ -466,6 +521,15 @@ def get_env_ll(task_name, enable_ik = True, record_dir=None, lookahead = 3, exte
             fingering_lookahead=use_fingering_emb,
         )
     else:
+        note_traj = _load_note_trajectory(task_name)
+
+        if left_hand_action_list is not None:
+            length_hint = left_hand_action_list.shape[0]
+        else:
+            length_hint = len(note_traj.notes)
+
+        trim = False if length_hint >= 600 or length_hint < 500 else True
+
         task = piano_with_shadow_hands_res.PianoWithShadowHandsResidual(
             note_trajectory=note_traj,
             change_color_on_activation=True,
@@ -483,8 +547,38 @@ def get_env_ll(task_name, enable_ik = True, record_dir=None, lookahead = 3, exte
             fingering_lookahead=use_fingering_emb,
         )
 
+    task_length = len(task._notes)
+
+    if left_hand_action_list is None or right_hand_action_list is None:
+        lh_path, rh_path = _generated_trajectory_paths(task_name)
+
+        if not (allow_missing_demo or external_demo):
+            raise FileNotFoundError(
+                "Missing high-level trajectory for low-level evaluation. Expected files:\n"
+                f"  {lh_path}\n"
+                f"  {rh_path}\n"
+                "Run eval_high_level.py first, or pass external_demo=True / allow_missing_demo=True "
+                "if you intentionally want to use zero placeholders."
+            )
+
+        left_hand_action_list = _empty_demo(task_length)
+        right_hand_action_list = _empty_demo(task_length)
+    else:
+        left_hand_action_list = _match_demo_length(
+            left_hand_action_list,
+            task_length,
+            "left_hand_action_list",
+        )
+        right_hand_action_list = _match_demo_length(
+            right_hand_action_list,
+            task_length,
+            "right_hand_action_list",
+        )
+
     env = composer_utils.Environment(
-        recompile_physics=False, task=task, strip_singleton_obs_buffer_dim=True
+        recompile_physics=False,
+        task=task,
+        strip_singleton_obs_buffer_dim=True,
     )
 
     if record_dir is not None:
@@ -494,36 +588,47 @@ def get_env_ll(task_name, enable_ik = True, record_dir=None, lookahead = 3, exte
             camera_id="piano/back",
             record_dir=record_dir,
         )
+
     if use_fingering_emb:
-        env = FingeringEmbWrapper(env, external_fingering=external_fingering)
-    if left_hand_action_list is None or right_hand_action_list is None:
-        length = len(env.task._notes)
-        left_hand_action_list = np.zeros((length, 8, 6))
-        right_hand_action_list = np.zeros((length, 8, 6))
-    env = DeepMimicWrapper(env,
-                        demonstrations_lh=left_hand_action_list,
-                        demonstrations_rh=right_hand_action_list,
-                        remove_goal_observation=False,
-                        mimic_z_axis=False,
-                        n_steps_lookahead=lookahead,)
-    env = ResidualWrapper(env,
-                        demonstrations_lh=left_hand_action_list,
-                        demonstrations_rh=right_hand_action_list,
-                        demo_ctrl_timestep=0.05,
-                        enable_ik=enable_ik,
-                        external_demo=external_demo,)
-    env = MidiEvaluationWrapper(
-        environment=env, deque_size=1
+        env = FingeringEmbWrapper(
+            env,
+            external_fingering=external_fingering,
+        )
+
+    env = DeepMimicWrapper(
+        env,
+        demonstrations_lh=left_hand_action_list,
+        demonstrations_rh=right_hand_action_list,
+        remove_goal_observation=False,
+        mimic_z_axis=False,
+        n_steps_lookahead=lookahead,
     )
+
+    env = ResidualWrapper(
+        env,
+        demonstrations_lh=left_hand_action_list,
+        demonstrations_rh=right_hand_action_list,
+        demo_ctrl_timestep=0.05,
+        enable_ik=enable_ik,
+        external_demo=external_demo,
+    )
+
+    env = MidiEvaluationWrapper(
+        environment=env,
+        deque_size=1,
+    )
+
     if enable_ik:
         env = CanonicalSpecWrapper(env, clip=True)
 
     env = SinglePrecisionWrapper(env)
     env = DmControlWrapper(env)
-
     env = Dm2GymWrapper(env)
 
     return env.env
+
+
+
 
 def adjust_ft_fingering(env, keys, lh_ft, rh_ft, last_keys=None, last_lh_ft=None, last_rh_ft=None, last_fingering=None):
     # print(lh_ft, rh_ft)
