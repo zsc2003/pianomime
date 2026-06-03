@@ -86,7 +86,8 @@ def load_goal_encoder(device: torch.device, ae_ckpt: Optional[str]):
     )
     state_dict = torch.load(ckpt_path, map_location=device)
     ae.load_state_dict(state_dict)
-    ae.eval()
+    # ae.eval()
+    ae.train()
     print(f"[FM-LL eval] loaded goal AE: {ckpt_path}")
     return ae.encoder
 
@@ -140,7 +141,8 @@ def main() -> None:
     ckpt_path = resolve_existing_path([args.ckpt_path, default_ll_ckpt(args.dataset_path)], what="low-level flow checkpoint")
     state_dict = torch.load(ckpt_path, map_location=device)
     velocity_net.load_state_dict(state_dict)
-    velocity_net.eval()
+    # velocity_net.eval()
+    velocity_net.train()
     print(f"[FM-LL eval] loaded checkpoint: {ckpt_path}")
     print(
         f"[FM-LL eval] flow_steps={args.num_flow_steps}, solver={args.solver}, "

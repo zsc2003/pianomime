@@ -97,7 +97,8 @@ def main():
         what="goal auto-encoder checkpoint",
     )
     ae.load_state_dict(torch.load(ae_ckpt, map_location=device))
-    ae.eval()
+    # ae.eval()
+    ae.train()
     encoder = ae.encoder
     print(f"[DDPM-HL eval] loaded goal AE: {ae_ckpt}")
 
@@ -107,7 +108,8 @@ def main():
         what="high-level DDPM checkpoint",
     )
     noise_pred_net.load_state_dict(torch.load(ckpt_path, map_location=device))
-    noise_pred_net.eval()
+    # noise_pred_net.eval()
+    noise_pred_net.train()
     print(f"[DDPM-HL eval] loaded checkpoint: {ckpt_path}")
 
     noise_scheduler = DDPMScheduler(

@@ -117,7 +117,8 @@ def main():
         what="goal auto-encoder checkpoint",
     )
     ae.load_state_dict(torch.load(ae_ckpt, map_location=device))
-    ae.eval()
+    # ae.eval()
+    ae.train()
     encoder = ae.encoder
     print(f"[DDPM-LL eval] loaded goal AE: {ae_ckpt}")
 
@@ -127,7 +128,8 @@ def main():
         what="low-level DDPM checkpoint",
     )
     noise_pred_net.load_state_dict(torch.load(ckpt_path, map_location=device))
-    noise_pred_net.eval()
+    # noise_pred_net.eval()
+    noise_pred_net.train()
     print(f"[DDPM-LL eval] loaded checkpoint: {ckpt_path}")
 
     trajectory_dir = ensure_utils_can_find_trajectories(args.task_name, args.trajectory_dir)
