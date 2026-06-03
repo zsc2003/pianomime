@@ -65,7 +65,7 @@ def build_model(device: torch.device) -> ConditionalUnet1D:
             mid_channels=32,
             out_channels=64,
             latent_dim=32,
-            noise=0.08,
+            noise=0.0,
         ).to(device)
 
     return ConditionalUnet1D(

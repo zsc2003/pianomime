@@ -58,7 +58,7 @@ def build_model(device: torch.device) -> ConditionalUnet1D:
             mid_channels=32,
             out_channels=64,
             latent_dim=32,
-            noise=0.08,
+            noise=0.0,
         ).to(device)
 
     return ConditionalUnet1D(
@@ -87,6 +87,20 @@ def load_goal_encoder(device: torch.device, ae_ckpt: Optional[str]):
     ae.train()
     print(f"[FM-HL eval] loaded goal AE: {ckpt_path}")
     return ae.encoder
+
+
+
+def set_condition_encoder_noise(model, noise: float = 0.0):
+    changed = []
+    for name, module in model.named_modules():
+        if hasattr(module, "noise"):
+            old = getattr(module, "noise")
+            setattr(module, "noise", noise)
+            changed.append((name, old, noise))
+    print(f"[FM-HL eval] set condition encoder noise to {noise} for {len(changed)} modules")
+    for name, old, new in changed[:5]:
+        print(f"  {name}: {old} -> {new}")
+
 
 
 @torch.no_grad()
@@ -118,6 +132,7 @@ def main() -> None:
     velocity_net.load_state_dict(state_dict)
     # velocity_net.eval()
     velocity_net.train()
+    set_condition_encoder_noise(velocity_net, 0.0)
     print(f"[FM-HL eval] loaded checkpoint: {ckpt_path}")
     print(
         f"[FM-HL eval] flow_steps={args.num_flow_steps}, solver={args.solver}, "
