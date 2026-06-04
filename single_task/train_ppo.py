@@ -110,11 +110,12 @@ def main(args: Args) -> None:
     if args.name:
         run_name = args.name
     else:
-        run_name = f"PPO-{args.environment_name}-{args.seed}-{time.time()}"
+        run_name = f"PPO-{args.environment_name}-{args.seed}-{time.strftime('%Y%m%d-%H%M%S')}"
 
     # Create experiment directory.
-    experiment_dir = Path(args.root_dir) / run_name
-    experiment_dir.mkdir(parents=True)
+    root = Path(args.root_dir)
+    tb_log_dir = root / run_name
+    tb_log_dir.mkdir(parents=True, exist_ok=True)
 
     # Seed RNGs.
     random.seed(args.seed)
@@ -130,7 +131,7 @@ def main(args: Args) -> None:
     # )
     eval_args = copy(args)
     eval_args = replace(eval_args, rsi=False)
-    eval_env = get_env(eval_args, record_dir=experiment_dir / "eval")
+    eval_env = get_env(eval_args, record_dir=tb_log_dir / "eval")
     def make_env():
         env = get_env(args)
         return Monitor(env)
@@ -150,17 +151,21 @@ def main(args: Args) -> None:
                 learning_rate=lr_scheduler_instance.lr_schedule,
                 policy_kwargs=policy_kwargs,
                 verbose=2,
-                tensorboard_log="./robopianist_rl/tensorboard/{}".format(run_name),
+                tensorboard_log=str(tb_log_dir),
                 )
     if args.pretrained is not None:
         # Reload learning rate scheduler
         custom_objects = { 'learning_rate': lr_scheduler_instance.lr_schedule}
         model = PPO.load(args.pretrained, env=vec_env, custom_objects=custom_objects)
 
-    tb_eval_dir = f"./robopianist_rl/tensorboard/{run_name}/eval"
-    writer = SummaryWriter(log_dir=tb_eval_dir)
+    tb_eval_dir = tb_log_dir / "PPO_0"
+    writer = SummaryWriter(log_dir=str(tb_eval_dir))
+
+    best_dir = tb_log_dir / "best"
+    best_dir.mkdir(parents=True, exist_ok=True)
 
     best_f1 = -np.inf
+    best_step = -1
     # last_extending_curriculum_step = 0
     try:
         for i in range(args.total_iters):
@@ -191,11 +196,16 @@ def main(args: Args) -> None:
             writer.add_scalar("train/lr", lr_scheduler_instance.lr, global_step=i)
             f1 = eval_env.env.get_musical_metrics()["f1"]
             if f1 > best_f1:
-                print("best_f1:{}->{}".format(best_f1, eval_env.env.get_musical_metrics()["f1"]))
-                best_f1 = eval_env.env.get_musical_metrics()["f1"]
-                model.save("./robopianist_rl/ckpts/{}_best".format(run_name))
-                # video = wandb.Video(str(eval_env.env.latest_filename), fps=4, format="mp4")
-                # wandb.log({"video": video, "global_step": i})
+                print("best_f1:{}->{} (step={})".format(best_f1, f1, i))
+                best_f1 = f1
+                best_step = i
+                best_prefix = f"best_step{i}"
+                model.save(str(best_dir / best_prefix))
+                video_src = eval_env.env.latest_filename
+                if video_src.exists():
+                    shutil.copy2(str(video_src), str(best_dir / f"{best_prefix}{video_src.suffix}"))
+                with open(best_dir / f"{best_prefix}_info.txt", "w") as f:
+                    f.write(f"step={i}\nf1={f1}\n")
 
             eval_env.env.latest_filename.unlink()
     except KeyboardInterrupt:
@@ -203,10 +213,9 @@ def main(args: Args) -> None:
 
     writer.close()
 
-    # model.save("./robopianist_rl/ckpts/{}".format(run_name))
-
     # Evaluate the trained model
-    model = PPO.load("./robopianist_rl/ckpts/{}_best".format(run_name), env=vec_env)
+    best_ckpt = sorted(best_dir.glob("best_step*.zip"))[-1]
+    model = PPO.load(str(best_ckpt), env=vec_env)
 
     obs, _ = eval_env.reset()
     actions = []
