@@ -56,8 +56,8 @@ class PianoWithShadowHandsResidual(base.PianoTask):
         trim_silence: bool = False,
         wrong_press_termination: bool = False,
         initial_buffer_time: float = 0.0,
-        disable_fingering_reward: bool = False,
-        disable_forearm_reward: bool = False,
+        enable_fingering_reward: bool = False,
+        enable_forearm_reward: bool = False,
         disable_colorization: bool = False,
         disable_hand_collisions: bool = False,
         augmentations: Optional[Sequence[base_variation.Variation]] = None,
@@ -72,7 +72,8 @@ class PianoWithShadowHandsResidual(base.PianoTask):
         smoothness_weight: float = 1.0,
         beta_action: float = 1.0,
         beta_accel: float = 1.0,
-        disable_smoothness_reward: bool = False,
+        enable_smoothness_reward: bool = False,
+        enable_energy_reward: bool = False,
         **kwargs,
     ) -> None:
         """Task constructor.
@@ -91,11 +92,11 @@ class PianoWithShadowHandsResidual(base.PianoTask):
             initial_buffer_time: Specifies the duration of silence in seconds to add to
                 the beginning of the MIDI file. A non-zero value can be useful for
                 giving the agent time to place its hands near the first notes.
-            disable_fingering_reward: If True, disables the shaping reward for
-                fingering. This will also disable the colorization of the fingertips
+            enable_fingering_reward: If True, enables the shaping reward for
+                fingering. This will also enable the colorization of the fingertips
                 and corresponding keys. Note that if the MIDI file does not contain
                 any fingering information, the fingering reward will also be disabled.
-            disable_forearm_reward: If True, disables the shaping reward for the
+            enable_forearm_reward: If True, enables the shaping reward for the
                 forearms.
             disable_colorization: If True, disables the colorization of the fingertips
                 and corresponding keys.
@@ -116,7 +117,7 @@ class PianoWithShadowHandsResidual(base.PianoTask):
             smoothness_weight: Weight for the smoothness reward.
             beta_action: Coefficient for action smoothness penalty.
             beta_accel: Coefficient for joint acceleration penalty.
-            disable_smoothness_reward: If True, disables the smoothness reward.
+            enable_smoothness_reward: If True, enables the smoothness reward.
         """
         super().__init__(arena=stage.Stage(), **kwargs)
         if note_trajectory is None and midi is None:
@@ -140,8 +141,8 @@ class PianoWithShadowHandsResidual(base.PianoTask):
                 np.ceil(n_seconds_lookahead / self.control_timestep)
             )
         self._initial_buffer_time = initial_buffer_time
-        self._disable_fingering_reward = disable_fingering_reward
-        self._disable_forearm_reward = disable_forearm_reward
+        self._enable_fingering_reward = enable_fingering_reward
+        self._enable_forearm_reward = enable_forearm_reward
         self._wrong_press_termination = wrong_press_termination
         self._disable_colorization = disable_colorization
         self._disable_hand_collisions = disable_hand_collisions
@@ -158,9 +159,10 @@ class PianoWithShadowHandsResidual(base.PianoTask):
         self._smoothness_weight = smoothness_weight
         self._beta_action = beta_action
         self._beta_accel = beta_accel
-        self._disable_smoothness_reward = disable_smoothness_reward
+        self._enable_smoothness_reward = enable_smoothness_reward
+        self._enable_energy_reward = enable_energy_reward
 
-        if not disable_fingering_reward and not disable_colorization:
+        if enable_fingering_reward and not disable_colorization:
             self._colorize_fingertips()
         if disable_hand_collisions:
             self._disable_collisions_between_hands()
@@ -173,13 +175,14 @@ class PianoWithShadowHandsResidual(base.PianoTask):
         self._reward_fn = composite_reward.CompositeReward(
             key_press_reward=self._compute_key_press_reward,
             sustain_reward=self._compute_sustain_reward,
-            energy_reward=self._compute_energy_reward,
         )
-        if not self._disable_fingering_reward:
+        if self._enable_energy_reward:
+            self._reward_fn.add("energy_reward", self._compute_energy_reward)
+        if self._enable_fingering_reward:
             self._reward_fn.add("fingering_reward", self._compute_fingering_reward)
-        if not self._disable_forearm_reward:
+        if self._enable_forearm_reward:
             self._reward_fn.add("forearm_reward", self._compute_forearm_reward)
-        if not self._disable_smoothness_reward:
+        if self._enable_smoothness_reward:
             self._reward_fn.add("smoothness_reward", self._compute_smoothness_reward)
 
     def _reset_quantities_at_episode_init(self) -> None:
@@ -268,7 +271,7 @@ class PianoWithShadowHandsResidual(base.PianoTask):
         if self._curriculum:
             self._should_terminate = self._should_terminate or self._t_idx == self._curriculum_length
         self._goal_current = self._goal_state[0]
-        if not self._disable_fingering_reward:
+        if self._enable_fingering_reward:
             self._rh_keys_current = self._rh_keys
             self._lh_keys_current = self._lh_keys
             if not self._disable_colorization:
@@ -361,7 +364,7 @@ class PianoWithShadowHandsResidual(base.PianoTask):
         for hand in [self.right_hand, self.left_hand]:
             power = hand.observables.actuators_power(physics).copy()
             rew -= self._energy_penalty_coef * np.sum(power)
-        return 0
+        return rew
 
     def _compute_key_press_reward(self, physics: mjcf.Physics) -> float:
         """Reward for pressing the right keys at the right time."""
@@ -415,8 +418,7 @@ class PianoWithShadowHandsResidual(base.PianoTask):
             margin=(_FINGER_CLOSE_ENOUGH_TO_KEY * 10),
             sigmoid="gaussian",
         )
-        # return float(np.mean(rews))
-        return 0.0
+        return float(np.mean(rews))
 
     def _compute_smoothness_reward(self, physics: mjcf.Physics) -> float:
         """Reward for smooth actions and joint trajectories.
@@ -566,7 +568,7 @@ class PianoWithShadowHandsResidual(base.PianoTask):
             return self._fingering_state.ravel()
 
         fingering_observable = observable.Generic(_get_fingering_state)
-        fingering_observable.enabled = not self._disable_fingering_reward
+        fingering_observable.enabled = self._enable_fingering_reward
         self._task_observables["fingering"] = fingering_observable
 
     def _colorize_fingertips(self) -> None:

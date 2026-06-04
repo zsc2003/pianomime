@@ -3,7 +3,6 @@
 WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=egl XLA_PYTHON_CLIENT_PREALLOCATE=false CUDA_VISIBLE_DEVICES=0 MUJOCO_EGL_DEVICE_ID=0 python pianomime/single_task/train_ppo.py \
     --root-dir /tmp/robopianist/rl/ \
     --n-steps-lookahead 10 \
-    --disable_fingering_reward \
     --residual-action \
     --frame-stack 4 \
     --num-envs 32 \

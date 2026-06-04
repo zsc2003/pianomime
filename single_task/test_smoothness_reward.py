@@ -69,7 +69,7 @@ def test_smoothness_reward() -> int:
         use_note_trajectory=True,
         deepmimic=False,
         residual_action=False,
-        disable_smoothness_reward=False,
+        enable_smoothness_reward=True,
         smoothness_weight=1.0,
         beta_action=1.0,
         beta_accel=1.0,
@@ -140,14 +140,14 @@ def test_smoothness_reward() -> int:
     args_disabled = Args(
         mimic_task=mimic_task,
         use_note_trajectory=True,
-        disable_smoothness_reward=True,
+        enable_smoothness_reward=False,
     )
     env2 = get_env(args_disabled)
     task2, _ = _unwrap_task_and_physics(env2)
     assert "smoothness_reward" not in task2._reward_fn.reward_fns, (
         "smoothness_reward should not be registered when disabled"
     )
-    print("Test 5 PASSED: disable_smoothness_reward=True prevents registration")
+    print("Test 5 PASSED: enable_smoothness_reward=False prevents registration")
 
     print("All smoothness reward tests PASSED!")
     return 0

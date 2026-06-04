@@ -69,8 +69,10 @@ class Args:
     stretch_factor: float = 1.0
     shift_factor: int = 0
     wrong_press_termination: bool = False
-    disable_fingering_reward: bool = False
-    disable_forearm_reward: bool = True
+    enable_fingering_reward: bool = False
+    enable_forearm_reward: bool = False
+    enable_smoothness_reward: bool = False
+    enable_energy_reward: bool = False
     disable_colorization: bool = False
     disable_hand_collisions: bool = True
     primitive_fingertip_collisions: bool = False
@@ -99,7 +101,7 @@ class Args:
     smoothness_weight: float = 1.0
     beta_action: float = 1.0
     beta_accel: float = 1.0
-    disable_smoothness_reward: bool = False
+
 
 def prefix_dict(prefix: str, d: dict) -> dict:
     return {f"{prefix}/{k}": v for k, v in d.items()}

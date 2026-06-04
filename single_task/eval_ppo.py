@@ -82,8 +82,8 @@ class Args:
     stretch_factor: float = 1.0
     shift_factor: int = 0
     wrong_press_termination: bool = False
-    disable_fingering_reward: bool = False
-    disable_forearm_reward: bool = False
+    enable_fingering_reward: bool = True
+    enable_forearm_reward: bool = True
     disable_colorization: bool = False
     disable_hand_collisions: bool = False
     primitive_fingertip_collisions: bool = False
