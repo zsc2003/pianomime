@@ -25,8 +25,10 @@ def read_dataset_split(dataset_path,
     # create dataloader
     train_loader = torch.utils.data.DataLoader(
         train_set,
-        batch_size=256,
-        num_workers=32,
+        # batch_size=256,
+        # num_workers=32,
+        batch_size=2048,
+        num_workers=16,
         shuffle=True,
         # accelerate cpu-gpu transfer
         pin_memory=True,
@@ -72,8 +74,10 @@ def read_dataset(pred_horizon,
     # create dataloader
     dataloader = torch.utils.data.DataLoader(
         dataset,
-        batch_size=256,
-        num_workers=32,
+        # batch_size=256,
+        # num_workers=32,
+        batch_size=4096,
+        num_workers=16,
         shuffle=True,
         # accelerate cpu-gpu transfer
         pin_memory=True,
