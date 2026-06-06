@@ -169,18 +169,20 @@ def main(args: Args) -> None:
     # last_extending_curriculum_step = 0
     try:
         for i in range(args.total_iters):
-            # Training
+            t0 = time.time()
             model.learn(total_timesteps=args.n_steps*args.num_envs,
                         progress_bar=True,
                         reset_num_timesteps=False,
                         callback= None)
-            # Evaluation
+            t_train = time.time()
             obs, _ = eval_env.reset()
             while True:
                 action, _state = model.predict(obs, deterministic=True)
                 obs, reward, done, _, info = eval_env.step(action)
                 if done == True:
                     break
+            t_eval = time.time()
+            print(f"[iter {i}] train={t_train-t0:.1f}s  eval={t_eval-t_train:.1f}s")
             log_dict = prefix_dict("eval", eval_env.env.get_statistics())
             music_dict = prefix_dict("eval", eval_env.env.get_musical_metrics())
             for k, v in (log_dict | music_dict).items():
