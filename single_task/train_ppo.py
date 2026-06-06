@@ -193,6 +193,9 @@ def main(args: Args) -> None:
                 reward_terms = eval_env.env.task._reward_fn.reward_terms
                 for k, v in reward_terms.items():
                     writer.add_scalar(f"eval/reward_{k}", v, global_step=i)
+                if hasattr(eval_env.env.task, 'smoothness_stats'):
+                    for k, v in eval_env.env.task.smoothness_stats.items():
+                        writer.add_scalar(f"eval/smoothness_{k}", v, global_step=i)
             writer.add_scalar("train/lr", lr_scheduler_instance.lr, global_step=i)
             f1 = eval_env.env.get_musical_metrics()["f1"]
             if f1 > best_f1:

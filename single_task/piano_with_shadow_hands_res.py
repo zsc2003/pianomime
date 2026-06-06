@@ -195,6 +195,8 @@ class PianoWithShadowHandsResidual(base.PianoTask):
         self._current_qpos = None
         self._prev_qpos = None
         self._prev_prev_qpos = None
+        self._qpos_scale = None  # Per-joint range for normalization, computed lazily
+        self._smoothness_stats = {"action_rate": 0.0, "accel_penalty": 0.0}
 
     def _maybe_change_midi(self, random_state: np.random.RandomState) -> None:
         if self._augmentations is not None:
@@ -335,6 +337,10 @@ class PianoWithShadowHandsResidual(base.PianoTask):
     def reward_fn(self) -> composite_reward.CompositeReward:
         return self._reward_fn
 
+    @property
+    def smoothness_stats(self) -> dict:
+        return dict(self._smoothness_stats)
+
     # Helper methods.
 
     def _compute_forearm_reward(self, physics: mjcf.Physics) -> float:
@@ -423,38 +429,67 @@ class PianoWithShadowHandsResidual(base.PianoTask):
     def _compute_smoothness_reward(self, physics: mjcf.Physics) -> float:
         """Reward for smooth actions and joint trajectories.
         
-        r_smooth = exp(-beta_action * ||a_t[0:46] - a_{t-1}[0:46]||^2 
-                       - beta_accel * ||q_t - 2*q_{t-1} + q_{t-2}||^2)
+        r_smooth = exp(-beta_action * mean((a_t - a_{t-1})^2)
+                       - beta_accel * mean((accel / scale)^2))
         
-        Returns 0.0 for the first 2 timesteps (insufficient history).
+        Returns smoothness_weight * 1.0 for the first 2 timesteps (insufficient history),
+        giving the agent the benefit of the doubt at episode start.
         """
-        del physics  # Joint positions already tracked in after_step.
-        
-        # Action rate penalty: ||a_t[0:46] - a_{t-1}[0:46]||^2 (exclude sustain pedal)
+        # Action rate penalty: mean((a_t[0:46] - a_{t-1}[0:46])^2) (exclude sustain pedal)
         if self._current_action is None or self._prev_action is None:
-            return 0.0
+            return self._smoothness_weight * 1.0
         
         assert self._current_action.shape == (47,), (
             f"Expected action shape (47,), got {self._current_action.shape}"
         )
-        action_diff = self._current_action[:-1] - self._prev_action[:-1]  # Exclude sustain
-        action_rate = np.sum(action_diff ** 2)
+        action_diff = self._current_action[:-1] - self._prev_action[:-1]
+        action_rate = float(np.mean(action_diff ** 2))
         
-        # Acceleration penalty: ||q_t - 2*q_{t-1} + q_{t-2}||^2
+        # Normalized by per-joint range so all joints contribute equally.
         if self._current_qpos is None or self._prev_qpos is None or self._prev_prev_qpos is None:
             accel_penalty = 0.0
         else:
             assert self._current_qpos.shape == (54,), (
                 f"Expected qpos shape (54,), got {self._current_qpos.shape}"
             )
+            # Lazy init: requires physics which isn't available in __init__.
+            if self._qpos_scale is None:
+                self._qpos_scale = self._compute_qpos_scale(physics)
             accel = self._current_qpos - 2.0 * self._prev_qpos + self._prev_prev_qpos
-            accel_penalty = np.sum(accel ** 2)
+            accel_normalized = accel / self._qpos_scale
+            accel_penalty = float(np.mean(accel_normalized ** 2))
+        
+        self._smoothness_stats["action_rate"] = action_rate
+        self._smoothness_stats["accel_penalty"] = accel_penalty
         
         smoothness = np.exp(
             -self._beta_action * action_rate - self._beta_accel * accel_penalty
         )
         
         return self._smoothness_weight * smoothness
+    
+    def _compute_qpos_scale(self, physics: mjcf.Physics) -> np.ndarray:
+        """Compute per-joint normalization scale from joint ranges.
+        
+        Uses (range_max - range_min) for each joint. Forearm slide joints
+        get a default scale of 1.0 since their range is set dynamically.
+        Falls back to π (radian scale) if the range cannot be read.
+        """
+        scales = []
+        for hand in (self.left_hand, self.right_hand):
+            for joint in hand.joints:
+                try:
+                    r = physics.bind(joint).range
+                    scale = float(r[1] - r[0])
+                except Exception:
+                    scale = np.pi
+                # Guard against zero or tiny ranges.
+                scales.append(max(scale, 1e-6))
+        result = np.array(scales, dtype=np.float64)
+        assert result.shape == (54,), (
+            f"Expected qpos_scale shape (54,), got {result.shape}"
+        )
+        return result
 
     def _update_goal_state(self) -> None:
         # Observable callables get called after `after_step` but before

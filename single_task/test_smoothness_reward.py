@@ -97,11 +97,15 @@ def test_smoothness_reward() -> int:
     assert task._current_action is not None, "current_action should be set after first step"
     assert task._prev_action is None, "prev_action should still be None after first step"
     smooth_first = task._compute_smoothness_reward(physics)
-    assert smooth_first == 0.0, f"first-step smoothness should be 0.0, got {smooth_first}"
+    assert smooth_first == 1.0, (
+        f"first-step smoothness should be 1.0 (max, no history), got {smooth_first}"
+    )
     task.get_reward(physics)
     assert "smoothness_reward" in task._reward_fn.reward_terms, "smoothness_reward missing from reward terms"
-    assert task._reward_fn.reward_terms["smoothness_reward"] == 0.0, "reward term should be 0.0 on first step"
-    print("Test 2 PASSED: first-step smoothness is 0.0 and tracked state is partial")
+    assert task._reward_fn.reward_terms["smoothness_reward"] == 1.0, (
+        "reward term should be 1.0 on first step (max benefit of the doubt)"
+    )
+    print("Test 2 PASSED: first-step smoothness is 1.0 (max, no history)")
 
     for _ in range(5):
         obs, reward, done, trunc, info = _step(env, zero_action)
@@ -109,7 +113,7 @@ def test_smoothness_reward() -> int:
         if done or trunc:
             break
     task, physics = _unwrap_task_and_physics(env)
-    action_rate = float(np.sum((task._current_action[:-1] - task._prev_action[:-1]) ** 2))
+    action_rate = float(np.mean((task._current_action[:-1] - task._prev_action[:-1]) ** 2))
     smooth_constant = float(task._compute_smoothness_reward(physics))
     task.get_reward(physics)
     recorded_constant = float(task._reward_fn.reward_terms["smoothness_reward"])

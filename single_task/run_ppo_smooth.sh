@@ -9,8 +9,12 @@ WANDB_DIR=/tmp/robopianist/ MUJOCO_GL=egl XLA_PYTHON_CLIENT_PREALLOCATE=false CU
     --lr-decay-rate 0.999 \
     --n-steps 512 \
     --mimic-task "NeverGonnaGiveYouUp_1" \
-    --environment-name "NeverGonnaGiveYouUp_1" \
+    --environment-name "NeverGonnaGiveYouUp_1_smooth" \
     --use-note-trajectory \
+    --enable-smoothness-reward \
+    --smoothness-weight 0.5 \
+    --beta-action 3.0 \
+    --beta-accel 30.0 \
     --total-iters 2000 \
     --residual-factor 0.03 \
     --deepmimic \
