@@ -2,14 +2,25 @@
 set -uo pipefail
 
 # ============================================================
+# Hybrid high-level acceleration experiments
+#   1) DDIM high-level + DDPM low-level
+#   2) Flow-Matching high-level + DDPM low-level
+#
+# This script intentionally does NOT run full DDPM, full DDIM,
+# or full Flow low-level. It assumes those were already run or are not needed.
+# ============================================================
+
+# ============================================================
 # Global switches
 # ============================================================
-# ENABLE_IK=1: pass --enable-ik to every eval_metrics.py call.
-# ENABLE_IK=0: pass --no-enable-ik to every eval_metrics.py call.
+# ENABLE_IK=1: pass --enable-ik to every eval_metrics_hybrid.py call.
+# ENABLE_IK=0: pass --no-enable-ik to every eval_metrics_hybrid.py call.
 ENABLE_IK=${ENABLE_IK:-1}
 
 # ============================================================
 # GPUs
+# You may repeat GPU ids to run multiple workers on the same GPU, e.g.
+#   GPUS=(2 2 3 3 4)
 # ============================================================
 GPUS=(2 3 4)
 
@@ -70,22 +81,21 @@ is_midi_song() {
 # ============================================================
 # Sampler step sweeps
 # ============================================================
-DDIM_STEPS=(25 50)
+# DDIM high-level only; low-level remains DDPM.
+DDIM_HL_STEPS=(25 50)
 
-# Flow Matching is evaluated in two protocols:
-#   euler: speed-oriented protocol
-#   heun:  quality-oriented protocol, about 2x network evaluations per step
-FLOW_EULER_STEPS=(10 20 50)
-FLOW_HEUN_STEPS=(10 20 50)
-FLOW_EULER_CLIP_MODE=${FLOW_EULER_CLIP_MODE:-final}
-FLOW_HEUN_CLIP_MODE=${FLOW_HEUN_CLIP_MODE:-none}
+# Flow Matching high-level only; low-level remains DDPM.
+# euler is speed-oriented; heun is quality-oriented but about 2x network evaluations.
+FLOW_HL_EULER_STEPS=(10 20 50)
+FLOW_HL_HEUN_STEPS=(10 20 50)
+FLOW_HL_EULER_CLIP_MODE=${FLOW_HL_EULER_CLIP_MODE:-final}
+FLOW_HL_HEUN_CLIP_MODE=${FLOW_HL_HEUN_CLIP_MODE:-none}
+
+# DDPM low-level inference iterations used in both hybrid policies.
+DDPM_LL_ITERS=${DDPM_LL_ITERS:-50}
 
 # ============================================================
 # Datasets / normalization stats
-# These zarr paths are read by eval scripts for normalization statistics.
-# Override from shell if given/reproduced checkpoints use different stats.
-# Example:
-#   GIVEN_DATASET_HL=official_dataset_hl.zarr GIVEN_DATASET_LL=official_dataset_ll.zarr bash pianomime/eval_metric_multi.sh
 # ============================================================
 GIVEN_DATASET_HL=${GIVEN_DATASET_HL:-dataset_hl.zarr}
 GIVEN_DATASET_LL=${GIVEN_DATASET_LL:-dataset_ll.zarr}
@@ -94,7 +104,8 @@ REPRODUCED_DATASET_HL=${REPRODUCED_DATASET_HL:-dataset_hl.zarr}
 REPRODUCED_DATASET_LL=${REPRODUCED_DATASET_LL:-dataset_ll.zarr}
 
 FLOW_DATASET_HL=${FLOW_DATASET_HL:-${REPRODUCED_DATASET_HL}}
-FLOW_DATASET_LL=${FLOW_DATASET_LL:-${REPRODUCED_DATASET_LL}}
+# Hybrid Flow-HL + DDPM-LL uses Flow stats for HL and reproduced DDPM stats for LL.
+FLOW_HL_DDPM_LL_DATASET_LL=${FLOW_HL_DDPM_LL_DATASET_LL:-${REPRODUCED_DATASET_LL}}
 
 # ============================================================
 # Checkpoints
@@ -109,15 +120,14 @@ REPRODUCED_AE_CKPT="reproduced_ckpt/checkpoint_ae.ckpt"
 REPRODUCED_DDPM_HL_CKPT="reproduced_ckpt/dataset_hl_without_fingering.ckpt"
 REPRODUCED_DDPM_LL_CKPT="reproduced_ckpt/dataset_ll.ckpt"
 
-# Flow checkpoint. Keep the same AE as the reproduced run unless you intentionally change it.
+# Flow Matching high-level checkpoint.
 FLOW_AE_CKPT="${REPRODUCED_AE_CKPT}"
 FLOW_HL_CKPT="flow/ckpts/checkpoint_FM-HL-dataset_hl_without_fingering.ckpt"
-FLOW_LL_CKPT="flow/ckpts/checkpoint_FM-LL-dataset_ll.ckpt"
 
 # ============================================================
 # Logs
 # ============================================================
-LOGDIR="logs/eval_metrics_$(date +%Y%m%d_%H%M%S)"
+LOGDIR="logs/eval_metrics_hybrid_$(date +%Y%m%d_%H%M%S)"
 METRICS_LOGDIR="${LOGDIR}/metrics"
 mkdir -p "${LOGDIR}" "${METRICS_LOGDIR}"
 
@@ -130,12 +140,12 @@ touch "${FAILED_FILE}"
 #   song|policy|label|steps|solver|clip_mode
 #
 # policy values:
-#   ddpm_given, ddpm, ddim_given, ddim, flow
+#   ddim_given_hl_ddpm_ll, ddim_hl_ddpm_ll, flow_hl_ddpm_ll
 #
 # Scheduling rule:
-#   We build the queue by experiment first and song second. The scheduler also
-#   prevents two tasks for the same song from running at the same time, because
-#   all eval scripts write/read pianomime/multi_task/trajectories/<song>_*.npy.
+#   Queue is built experiment-first and song-second. The scheduler prevents two
+#   tasks for the same song from running concurrently because all eval scripts
+#   write/read pianomime/multi_task/trajectories/<song>_*.npy.
 # ============================================================
 TASKS=()
 
@@ -152,26 +162,24 @@ add_task_for_all_songs() {
   done
 }
 
-# # DDPM.
-# add_task_for_all_songs "ddpm_given" "ddpm_given" "" "" ""
-# add_task_for_all_songs "ddpm" "ddpm" "" "" ""
-
-# # DDIM.
-# for step in "${DDIM_STEPS[@]}"; do
-#   add_task_for_all_songs "ddim_given" "ddim_given${step}" "${step}" "" ""
-# done
-# for step in "${DDIM_STEPS[@]}"; do
-#   add_task_for_all_songs "ddim" "ddim${step}" "${step}" "" ""
-# done
-
-# Flow Matching, speed-oriented Euler protocol.
-for step in "${FLOW_EULER_STEPS[@]}"; do
-  add_task_for_all_songs "flow" "fm_euler${step}" "${step}" "euler" "${FLOW_EULER_CLIP_MODE}"
+# DDIM high-level + DDPM low-level, author-provided checkpoints.
+for step in "${DDIM_HL_STEPS[@]}"; do
+  add_task_for_all_songs "ddim_given_hl_ddpm_ll" "ddimHL_given${step}_ddpmLL" "${step}" "" ""
 done
 
-# Flow Matching, quality-oriented Heun protocol.
-for step in "${FLOW_HEUN_STEPS[@]}"; do
-  add_task_for_all_songs "flow" "fm_heun${step}" "${step}" "heun" "${FLOW_HEUN_CLIP_MODE}"
+# DDIM high-level + DDPM low-level, reproduced checkpoints.
+for step in "${DDIM_HL_STEPS[@]}"; do
+  add_task_for_all_songs "ddim_hl_ddpm_ll" "ddimHL${step}_ddpmLL" "${step}" "" ""
+done
+
+# Flow high-level + DDPM low-level, speed-oriented Euler protocol.
+for step in "${FLOW_HL_EULER_STEPS[@]}"; do
+  add_task_for_all_songs "flow_hl_ddpm_ll" "fmHL_euler${step}_ddpmLL" "${step}" "euler" "${FLOW_HL_EULER_CLIP_MODE}"
+done
+
+# Flow high-level + DDPM low-level, quality-oriented Heun protocol.
+for step in "${FLOW_HL_HEUN_STEPS[@]}"; do
+  add_task_for_all_songs "flow_hl_ddpm_ll" "fmHL_heun${step}_ddpmLL" "${step}" "heun" "${FLOW_HL_HEUN_CLIP_MODE}"
 done
 
 TOTAL=${#TASKS[@]}
@@ -289,77 +297,51 @@ run_task() {
 
   local common_args=(--log-dir "${METRICS_LOGDIR}")
 
-  if [[ "${policy}" == "ddpm_given" ]]; then
-    CUDA_VISIBLE_DEVICES="${gpu}" python pianomime/eval_metrics.py "${song}" \
-      --policy ddpm \
-      --ae-ckpt "${GIVEN_AE_CKPT}" \
-      --high-level-ckpt "${GIVEN_DDPM_HL_CKPT}" \
-      --low-level-ckpt "${GIVEN_DDPM_LL_CKPT}" \
-      --dataset-hl "${GIVEN_DATASET_HL}" \
-      --dataset-ll "${GIVEN_DATASET_LL}" \
-      --label "${label}" \
-      "${common_args[@]}" \
-      "${midi_args[@]}" \
-      "${ik_args[@]}"
-
-  elif [[ "${policy}" == "ddpm" ]]; then
-    CUDA_VISIBLE_DEVICES="${gpu}" python pianomime/eval_metrics.py "${song}" \
-      --policy ddpm \
-      --ae-ckpt "${REPRODUCED_AE_CKPT}" \
-      --high-level-ckpt "${REPRODUCED_DDPM_HL_CKPT}" \
-      --low-level-ckpt "${REPRODUCED_DDPM_LL_CKPT}" \
-      --dataset-hl "${REPRODUCED_DATASET_HL}" \
-      --dataset-ll "${REPRODUCED_DATASET_LL}" \
-      --label "${label}" \
-      "${common_args[@]}" \
-      "${midi_args[@]}" \
-      "${ik_args[@]}"
-
-  elif [[ "${policy}" == "ddim_given" ]]; then
-    CUDA_VISIBLE_DEVICES="${gpu}" python pianomime/eval_metrics.py "${song}" \
-      --policy ddim \
+  if [[ "${policy}" == "ddim_given_hl_ddpm_ll" ]]; then
+    CUDA_VISIBLE_DEVICES="${gpu}" python pianomime/eval_metrics_hybrid.py "${song}" \
+      --policy ddim_hl_ddpm_ll \
       --ae-ckpt "${GIVEN_AE_CKPT}" \
       --high-level-ckpt "${GIVEN_DDPM_HL_CKPT}" \
       --low-level-ckpt "${GIVEN_DDPM_LL_CKPT}" \
       --dataset-hl "${GIVEN_DATASET_HL}" \
       --dataset-ll "${GIVEN_DATASET_LL}" \
       --ddim-steps "${steps}" \
+      --ddpm-ll-iters "${DDPM_LL_ITERS}" \
       --label "${label}" \
       "${common_args[@]}" \
       "${midi_args[@]}" \
       "${ik_args[@]}"
 
-  elif [[ "${policy}" == "ddim" ]]; then
-    CUDA_VISIBLE_DEVICES="${gpu}" python pianomime/eval_metrics.py "${song}" \
-      --policy ddim \
+  elif [[ "${policy}" == "ddim_hl_ddpm_ll" ]]; then
+    CUDA_VISIBLE_DEVICES="${gpu}" python pianomime/eval_metrics_hybrid.py "${song}" \
+      --policy ddim_hl_ddpm_ll \
       --ae-ckpt "${REPRODUCED_AE_CKPT}" \
       --high-level-ckpt "${REPRODUCED_DDPM_HL_CKPT}" \
       --low-level-ckpt "${REPRODUCED_DDPM_LL_CKPT}" \
       --dataset-hl "${REPRODUCED_DATASET_HL}" \
       --dataset-ll "${REPRODUCED_DATASET_LL}" \
       --ddim-steps "${steps}" \
+      --ddpm-ll-iters "${DDPM_LL_ITERS}" \
       --label "${label}" \
       "${common_args[@]}" \
       "${midi_args[@]}" \
       "${ik_args[@]}"
 
-  elif [[ "${policy}" == "flow" ]]; then
-    CUDA_VISIBLE_DEVICES="${gpu}" python pianomime/eval_metrics.py "${song}" \
-      --policy flow \
+  elif [[ "${policy}" == "flow_hl_ddpm_ll" ]]; then
+    CUDA_VISIBLE_DEVICES="${gpu}" python pianomime/eval_metrics_hybrid.py "${song}" \
+      --policy flow_hl_ddpm_ll \
       --ae-ckpt "${FLOW_AE_CKPT}" \
       --high-level-ckpt "${FLOW_HL_CKPT}" \
-      --low-level-ckpt "${FLOW_LL_CKPT}" \
+      --low-level-ckpt "${REPRODUCED_DDPM_LL_CKPT}" \
       --dataset-hl "${FLOW_DATASET_HL}" \
-      --dataset-ll "${FLOW_DATASET_LL}" \
+      --dataset-ll "${FLOW_HL_DDPM_LL_DATASET_LL}" \
       --flow-steps "${steps}" \
       --flow-solver "${solver}" \
       --flow-clip-mode "${clip_mode}" \
       --flow-hl-steps "${steps}" \
-      --flow-ll-steps "${steps}" \
       --flow-hl-solver "${solver}" \
-      --flow-ll-solver "${solver}" \
       --flow-hl-clip-mode "${clip_mode}" \
-      --flow-ll-clip-mode "${clip_mode}" \
+      --ddpm-ll-iters "${DDPM_LL_ITERS}" \
       --label "${label}" \
       "${common_args[@]}" \
       "${midi_args[@]}" \
@@ -387,8 +369,6 @@ worker() {
     fi
 
     if [[ "${item}" == "__WAIT__" ]]; then
-      # All remaining pending tasks conflict with currently active songs.
-      # Sleep briefly and try again, instead of blocking a GPU inside eval_metrics.py.
       sleep 5
       continue
     fi
@@ -419,15 +399,14 @@ echo "GPUs: ${GPUS[*]}"
 echo "Logs: ${LOGDIR}"
 echo "Metrics CSV: ${METRICS_LOGDIR}/results.csv"
 echo "ENABLE_IK: ${ENABLE_IK}"
-echo "DDIM steps: ${DDIM_STEPS[*]}"
-echo "Flow Euler steps: ${FLOW_EULER_STEPS[*]} clip=${FLOW_EULER_CLIP_MODE}"
-echo "Flow Heun steps:  ${FLOW_HEUN_STEPS[*]} clip=${FLOW_HEUN_CLIP_MODE}"
-echo "DDPM/DDIM given ckpt:      ${GIVEN_DDPM_HL_CKPT} / ${GIVEN_DDPM_LL_CKPT}"
-echo "DDPM/DDIM reproduced ckpt: ${REPRODUCED_DDPM_HL_CKPT} / ${REPRODUCED_DDPM_LL_CKPT}"
-echo "Flow ckpt:                 ${FLOW_HL_CKPT} / ${FLOW_LL_CKPT}"
-echo "Given dataset stats:       ${GIVEN_DATASET_HL} / ${GIVEN_DATASET_LL}"
-echo "Reproduced dataset stats:  ${REPRODUCED_DATASET_HL} / ${REPRODUCED_DATASET_LL}"
-echo "Flow dataset stats:        ${FLOW_DATASET_HL} / ${FLOW_DATASET_LL}"
+echo "DDIM-HL steps: ${DDIM_HL_STEPS[*]} + DDPM-LL iters=${DDPM_LL_ITERS}"
+echo "Flow-HL Euler steps: ${FLOW_HL_EULER_STEPS[*]} clip=${FLOW_HL_EULER_CLIP_MODE} + DDPM-LL iters=${DDPM_LL_ITERS}"
+echo "Flow-HL Heun steps:  ${FLOW_HL_HEUN_STEPS[*]} clip=${FLOW_HL_HEUN_CLIP_MODE} + DDPM-LL iters=${DDPM_LL_ITERS}"
+echo "DDIM/DDPM given ckpt:      ${GIVEN_DDPM_HL_CKPT} / ${GIVEN_DDPM_LL_CKPT}"
+echo "DDIM/DDPM reproduced ckpt: ${REPRODUCED_DDPM_HL_CKPT} / ${REPRODUCED_DDPM_LL_CKPT}"
+echo "Flow-HL ckpt:              ${FLOW_HL_CKPT}"
+echo "Flow-HL dataset stats:     ${FLOW_DATASET_HL}"
+echo "Hybrid DDPM-LL stats:      ${FLOW_HL_DDPM_LL_DATASET_LL}"
 
 for gpu in "${GPUS[@]}"; do
   worker "${gpu}" &
